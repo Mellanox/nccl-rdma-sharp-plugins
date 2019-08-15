@@ -1,0 +1,10 @@
+prefix = @prefix@
+exec_prefix = @exec_prefix@
+libdir = @libdir@
+
+Name: @PACKAGE@
+URL: @PACKAGE_URL@
+Description:  RDMA and SHARP plugins for NCCL Collective library
+Version: @MAJOR_VERSION@.@MINOR_VERSION@
+Libs: -L${libdir} -lnccl-net.so
+

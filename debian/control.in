@@ -1,0 +1,14 @@
+Source: @PACKAGE@
+Section: libs
+Priority: extra
+Maintainer: support@mellanox.com
+Build-Depends: libibverbs-dev
+Standards-Version: @MAJOR_VERSION@.@MINOR_VERSION@
+Homepage: http://www.mellanox.com
+
+Package: @PACKAGE@
+Section: libs
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Architecture: any
+Description: RDMA and SHARP plugin for NCCL
+ Plugin enabled RDMA and  switch collectives(SHARP) in NCCL
