@@ -145,6 +145,8 @@ cd ${NCCL_TESTS_DIR}
 make clean
 make -j CUDA_HOME="${CUDA_HOME}" NCCL_HOME="${NCCL_DIR}" MPI=1 MPI_HOME="${MPI_HOME}"
 
+export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_PLUGIN_DIR}/lib:${SHARP_DIR}/lib:${LD_LIBRARY_PATH}"
+
 # USAGE: all_reduce_perf
         # [-t,--nthreads <num threads>]
         # [-g,--ngpus <gpus per thread>]
@@ -211,8 +213,6 @@ make -j CUDA_HOME="${CUDA_HOME}" NCCL_HOME="${NCCL_DIR}" MPI=1 MPI_HOME="${MPI_H
     echo "# Test 2..."
     echo_hash_line
 
-    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_PLUGIN_DIR}/lib:${SHARP_DIR}/lib:${LD_LIBRARY_PATH}"
-
     MPIRUN_OPTIONS_SPECIFIC="\
     -x NCCL_LL_THRESHOLD=1000000000 \
     -x NCCL_TREE_THRESHOLD=1000000000 \
@@ -247,7 +247,6 @@ fi
     echo "# Test 3..."
     echo_hash_line
 
-    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
     MPIRUN_OPTIONS_SPECIFIC="\
     -x NCCL_LL_THRESHOLD=1000000000 \
     -x NCCL_TREE_THRESHOLD=1000000000 \
@@ -273,7 +272,6 @@ fi
     echo "# Test 4..."
     echo_hash_line
     
-    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
     MPIRUN_OPTIONS_SPECIFIC="\
     -x NCCL_LL_THRESHOLD=0 \
     -x NCCL_TREE_THRESHOLD=1000000000 \
@@ -299,7 +297,6 @@ fi
     echo "# Test 5..."
     echo_hash_line
     
-    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
     MPIRUN_OPTIONS_SPECIFIC="\
     -x NCCL_TREE_THRESHOLD=1000000000 \
     "
@@ -324,7 +321,6 @@ fi
     echo "# Test 6..."
     echo_hash_line
     
-    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
     MPIRUN_OPTIONS_SPECIFIC="\
     -x NCCL_LL_THRESHOLD=1000000000 \
     -x NCCL_TREE_THRESHOLD=0 \
@@ -350,7 +346,6 @@ fi
     echo "# Test 7..."
     echo_hash_line
     
-    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
     MPIRUN_OPTIONS_SPECIFIC="\
     -x NCCL_LL_THRESHOLD=0 \
     -x NCCL_TREE_THRESHOLD=0 \
@@ -376,7 +371,6 @@ fi
     echo "# Test 8..."
     echo_hash_line
     
-    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
     MPIRUN_OPTIONS_SPECIFIC="\
     -x NCCL_TREE_THRESHOLD=0 \
     "
