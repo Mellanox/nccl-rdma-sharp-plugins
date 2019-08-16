@@ -9,8 +9,9 @@ pipeline {
     }
 
     environment {
-        WORK_DIR = "${env.WORKSPACE}"
+        SRC_ROOT = "${env.WORKSPACE}"
         ARTEFACT_DIR = "${env.WORKSPACE}/artefacts"
+        NFS_WORKSPACE = "/.autodirect/mtrswgwork/_ml_devops_team/workspace/ml-nccl-rdma-sharp-plugins-pr/${env.BUILD_NUMBER}"
         // Variables for publish_artefacts_to_gist.py
         UPSTREAM_JOB_NAME = "${env.JOB_NAME}"
         UPSTREAM_BUILD_NUMBER = "${env.BUILD_NUMBER}"
@@ -22,50 +23,48 @@ pipeline {
         stage('Preparations') {
             steps {
                 echo 'Preparations...'
-                echo "DEBUG: WORK_DIR = ${WORK_DIR}"
+                echo "DEBUG: SRC_ROOT = ${SRC_ROOT}"
                 echo "DEBUG: ARTEFACT_DIR = ${ARTEFACT_DIR}"
+                echo "DEBUG: NFS_WORKSPACE = ${NFS_WORKSPACE}"
                 echo "DEBUG: UPSTREAM_JOB_NAME = ${UPSTREAM_JOB_NAME}"
                 echo "DEBUG: UPSTREAM_ghprbGhRepository = ${UPSTREAM_ghprbGhRepository}"
                 echo "DEBUG: UPSTREAM_ghprbPullId = ${UPSTREAM_ghprbPullId}"
                 sh 'mkdir -p ${ARTEFACT_DIR}'
+                sh 'mkdir -p ${NFS_WORKSPACE}'
             }
         }
         stage('Checkout NCCL tests') {
-            steps {
-                //checkout([
-                //    $class: 'GitSCM',
-                //    branches: [[name: 'master']],
-                //    doGenerateSubmoduleConfigurations: false,
-                //    extensions: [[
-                //        $class: 'RelativeTargetDirectory',
-                //        relativeTargetDir: 'nccl-sharp'
-                //    ]],
-                //    submoduleCfg: [],
-                //    userRemoteConfigs: [[
-                //        url: 'git@gitlab.com:Mellanox/nccl-sharp.git'
-                //    ]]
-                //])
-                //checkout([
-                //    $class: 'GitSCM',
-                //    branches: [[name: 'master']],
-                //    doGenerateSubmoduleConfigurations: false,
-                //    extensions: [[
-                //        $class: 'RelativeTargetDirectory',
-                //        relativeTargetDir: 'nccl-sharp/nccl-tests'
-                //    ]],
-                //    submoduleCfg: [],
-                //    userRemoteConfigs: [[
-                //        url: 'https://github.com/NVIDIA/nccl-tests.git'
-                //    ]]
-                //])
-                sh 'pwd'
-                sh 'ls -al'
+            stage('Checkout NCCL tests') {
+                steps {
+                    dir("${NFS_WORKSPACE}") {
+                        git branch: 'master',
+                        credentialsId: 'mellanox-github',
+                        url: 'https://github.com/NVIDIA/nccl-tests.git'
+                    }
+                }
             }
+            //steps {
+            //    checkout([
+            //        $class: 'GitSCM',
+            //        branches: [[name: 'master']],
+            //        doGenerateSubmoduleConfigurations: false,
+            //        extensions: [[
+            //            $class: 'RelativeTargetDirectory',
+            //            relativeTargetDir: 'nccl-tests'
+            //        ]],
+            //        submoduleCfg: [],
+            //        userRemoteConfigs: [[
+            //            url: 'https://github.com/NVIDIA/nccl-tests.git'
+            //        ]]
+            //    ])
+            //    sh 'pwd'
+            //    sh 'ls -al'
+            //}
         }
         stage('Build nccl-rdma-sharp-plugins') {
             steps {
                 echo 'Building nccl-rdma-sharp-plugins...'
-                sh '${WORK_DIR}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
+                sh '${SRC_ROOT}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
             }
         }
         stage('Test nccl-rdma-sharp-plugins') {
@@ -77,13 +76,13 @@ pipeline {
     post {
         always {
             echo 'Post-actions...'
-            echo "DEBUG: WORK_DIR = ${WORK_DIR}"
+            echo "DEBUG: SRC_ROOT = ${SRC_ROOT}"
             echo "DEBUG: ARTEFACT_DIR = ${ARTEFACT_DIR}"
             echo "DEBUG: UPSTREAM_JOB_NAME = ${UPSTREAM_JOB_NAME}"
             echo "DEBUG: UPSTREAM_ghprbGhRepository = ${UPSTREAM_ghprbGhRepository}"
             echo "DEBUG: UPSTREAM_ghprbPullId = ${UPSTREAM_ghprbPullId}"
             echo 'Publish artefacts...'
-            sh 'rm -rf ${WORK_DIR}/gist_tmp'
+            sh 'rm -rf ${SRC_ROOT}/gist_tmp'
             sh 'ls -al ${ARTEFACT_DIR}'
             sh 'python /.autodirect/mtrswgwork/artemry/ci_tools_do_not_remove/publish_artefacts_to_gist.py'
         }
