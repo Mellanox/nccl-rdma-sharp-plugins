@@ -12,6 +12,9 @@ pipeline {
         SRC_ROOT = "${env.WORKSPACE}"
         ARTEFACT_DIR = "${env.WORKSPACE}/artefacts"
         NFS_WORKSPACE = "/.autodirect/mtrswgwork/_ml_devops_team/workspace/ml-nccl-rdma-sharp-plugins-pr/${env.BUILD_NUMBER}"
+        CUDA_HOME = "/hpc/local/oss/cuda10.0"
+        NCCL_DIR = "/hpc/local/oss/nccl_2.3.5-2_with_cuda10.0_x86_64"
+        NCCL_TEST_DIR = "${NCCL_TEST_DIR}/nccl-tests"
         // Variables for publish_artefacts_to_gist.py
         UPSTREAM_JOB_NAME = "${env.JOB_NAME}"
         UPSTREAM_BUILD_NUMBER = "${env.BUILD_NUMBER}"
@@ -26,6 +29,9 @@ pipeline {
                 echo "DEBUG: SRC_ROOT = ${SRC_ROOT}"
                 echo "DEBUG: ARTEFACT_DIR = ${ARTEFACT_DIR}"
                 echo "DEBUG: NFS_WORKSPACE = ${NFS_WORKSPACE}"
+                echo "DEBUG: CUDA_HOME = ${CUDA_HOME}"
+                echo "DEBUG: NCCL_DIR = ${NCCL_DIR}"
+                echo "DEBUG: NCCL_TEST_DIR = ${NCCL_TEST_DIR}"
                 echo "DEBUG: UPSTREAM_JOB_NAME = ${UPSTREAM_JOB_NAME}"
                 echo "DEBUG: UPSTREAM_ghprbGhRepository = ${UPSTREAM_ghprbGhRepository}"
                 echo "DEBUG: UPSTREAM_ghprbPullId = ${UPSTREAM_ghprbPullId}"
@@ -35,9 +41,9 @@ pipeline {
         }
         stage('Checkout NCCL tests') {
             steps {
-                dir("${NFS_WORKSPACE}") {
+                sh 'mkdir -p ${NCCL_TEST_DIR}'
+                dir("${NCCL_TEST_DIR}") {
                     git branch: 'master',
-                    credentialsId: 'mellanox-github',
                     url: 'https://github.com/NVIDIA/nccl-tests.git'
                 }
             }
@@ -67,14 +73,14 @@ pipeline {
         }
         stage('Test nccl-rdma-sharp-plugins') {
             steps {
-                echo 'Testing nccl-rdma-sharp-plugins... (not yet implemented)'
+                echo 'Testing nccl-rdma-sharp-plugins...'
+                sh '${SRC_ROOT}/.ci/run_nccl_test.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
             }
         }
     }
     post {
         always {
             echo 'Post-actions...'
-            echo "DEBUG: SRC_ROOT = ${SRC_ROOT}"
             echo "DEBUG: ARTEFACT_DIR = ${ARTEFACT_DIR}"
             echo "DEBUG: UPSTREAM_JOB_NAME = ${UPSTREAM_JOB_NAME}"
             echo "DEBUG: UPSTREAM_ghprbGhRepository = ${UPSTREAM_ghprbGhRepository}"

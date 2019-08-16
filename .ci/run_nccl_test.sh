@@ -26,12 +26,14 @@ then
 fi
 
 CI_DIR="${SRC_ROOT}/.ci"
+NCCL_PLUGIN_DIR="${SRC_ROOT}/_install"
 
 if [ -z "${SHARP_DIR}" ]
 then
     if [ -z "${HPCX_SHARP_DIR}" ]
     then
         echo "ERROR: SHARP_DIR and HPCX_SHARP_DIR not set"
+        echo "FAIL"
         exit 1
     else
         SHARP_DIR="${HPCX_SHARP_DIR}"
@@ -43,6 +45,7 @@ echo "DEBUG: SHARP_DIR = ${SHARP_DIR}"
 if [ ! -d "${HPCX_DIR}" ]
 then
     echo "ERROR: ${HPCX_DIR} does not exist or not accessible"
+    echo "FAIL"
     exit 1
 fi
 
@@ -51,11 +54,16 @@ GLOBAL_TEST_STATUS=0
 if [ -z "${NCCL_DIR}" ]
 then
     echo "ERROR: NCCL_DIR is empty"
+    echo "FAIL"
     exit 1
 fi
 
-NCCL_PLUGIN_DIR="${SRC_ROOT}/_install"
-NCCL_TESTS_DIR="${SRC_ROOT}/nccl-tests"
+if [ -z "${NCCL_TESTS_DIR}" ]
+then
+    echo "ERROR: NCCL_TESTS_DIR is empty"
+    echo "FAIL"
+    exit 1
+fi
 
 #
 # Set affinity to 2 cores according to Jenkins executor number
@@ -78,6 +86,7 @@ MPIRUN_OPTIONS_COMMON="\
 -x NCCL_DEBUG_SUBSYS=INIT \
 -x NCCL_IB_HCA=${IB_DEV} \
 -x NCCL_NET_GDR_LEVEL=5 \
+-x NCCL_SOCKET_IFNAME=eno1 \
 -x UCX_NET_DEVICES=${IB_DEV} \
 -x HCOLL_ENABLE_SHARP=0 \
 -x HCOLL_ENABLE_MCAST_ALL=0 \
@@ -100,7 +109,7 @@ MSG_SIZE_MAX="4M"
 # MPI_APP="hostname"
 MPI_APP="\
 ${AFFINITY} \
-${NCCL_TESTS_DIR}/build/all_reduce_perf_wrapper.sh \
+${NCCL_TESTS_DIR}/build/all_reduce_perf \
     -b ${MSG_SIZE_MIN} \
     -e ${MSG_SIZE_MAX} \
     -f 2 \
@@ -124,9 +133,10 @@ echo "SHARP_DIR: ${SHARP_DIR}"
 echo "NCCL_PLUGIN_DIR: ${NCCL_PLUGIN_DIR}"
 echo "MPI_HOME: ${MPI_HOME}"
 
-if [ ! -f ${HOSTFILE} ]
+if [ ! -f "${HOSTFILE}" ]
 then
     echo "ERROR: ${HOSTFILE} doesn't exist or not accessible"
+    echo "FAIL"
     exit 1
 fi
 
@@ -134,9 +144,6 @@ fi
 cd ${NCCL_TESTS_DIR}
 make clean
 make -j CUDA_HOME="${CUDA_HOME}" NCCL_HOME="${NCCL_DIR}" MPI=1 MPI_HOME="${MPI_HOME}"
-
-# TODO: W/A due to misconfigired network on hpc-test-node-gpu0[1-2]
-cp ${SCRIPT_DIR}/all_reduce_perf_wrapper.sh ${NCCL_TESTS_DIR}/build/all_reduce_perf_wrapper.sh
 
 # USAGE: all_reduce_perf
         # [-t,--nthreads <num threads>]
@@ -387,34 +394,13 @@ else
 fi
 
 ###############################################################################
-# Run NCCL-TESTS (non-MPI)
-###############################################################################
-# (
-    # echo_hash_line
-    # echo "# Test 9..."
-    # echo_hash_line
-    # export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
-    
-    # "${NCCL_TESTS_DIR}"/build/all_reduce_perf \
-            # -b 8 \
-            # -e 128M \
-            # -f 2 \
-            # -g 2 \
-            # -c 0
-# )
-# if [ $? -ne 0 ]
-# then
-    # echo " # Test 9... failed"
-    # GLOBAL_TEST_STATUS=1
-# else
-    # echo " # Test 9... passed"
-# fi
-
-###############################################################################
 if [ ${GLOBAL_TEST_STATUS} -ne 0 ]
 then
     echo "ERROR: some tests failed, check the log file"
+    echo "FAIL"
     exit 1
 else
     echo "All tests PASSED"
 fi
+
+echo "PASS"
