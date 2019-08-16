@@ -74,6 +74,7 @@ pipeline {
         }
     }
     post {
+        agent {label "master"}
         always {
             echo 'Post-actions...'
             echo "DEBUG: WORK_DIR = ${WORK_DIR}"
