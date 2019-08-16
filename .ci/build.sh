@@ -19,6 +19,7 @@ $WORKSPACE/autogen.sh
 if [ $? -ne 0 ]
 then
     echo "ERROR: $WORKSPACE/autogen.sh failed"
+    echo "FAIL"
     exit 1
 fi
 
@@ -29,6 +30,7 @@ $WORKSPACE/configure \
 if [ $? -ne 0 ]
 then
     echo "ERROR: $WORKSPACE/configure failed"
+    echo "FAIL"
     exit 1
 fi
 
@@ -36,8 +38,11 @@ make -j install
 if [ $? -ne 0 ]
 then
     echo "ERROR: 'make -j install' failed"
+    echo "FAIL"
     exit 1
 fi
 
 echo "DEBUG: $WORKSPACE/_install:"
 find $WORKSPACE/_install -type f
+
+echo "PASS"
