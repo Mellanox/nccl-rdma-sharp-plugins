@@ -14,7 +14,7 @@ pipeline {
         NFS_WORKSPACE = "/.autodirect/mtrswgwork/_ml_devops_team/workspace/ml-nccl-rdma-sharp-plugins-pr/${env.BUILD_NUMBER}"
         CUDA_HOME = "/hpc/local/oss/cuda10.0"
         NCCL_DIR = "/hpc/local/oss/nccl_2.3.5-2_with_cuda10.0_x86_64"
-        NCCL_TESTS_DIR = "${NCCL_TESTS_DIR}/nccl-tests"
+        NCCL_TESTS_DIR = "${NFS_WORKSPACE}/nccl-tests"
         // Variables for publish_artefacts_to_gist.py
         UPSTREAM_JOB_NAME = "${env.JOB_NAME}"
         UPSTREAM_BUILD_NUMBER = "${env.BUILD_NUMBER}"
