@@ -34,13 +34,11 @@ pipeline {
             }
         }
         stage('Checkout NCCL tests') {
-            stage('Checkout NCCL tests') {
-                steps {
-                    dir("${NFS_WORKSPACE}") {
-                        git branch: 'master',
-                        credentialsId: 'mellanox-github',
-                        url: 'https://github.com/NVIDIA/nccl-tests.git'
-                    }
+            steps {
+                dir("${NFS_WORKSPACE}") {
+                    git branch: 'master',
+                    credentialsId: 'mellanox-github',
+                    url: 'https://github.com/NVIDIA/nccl-tests.git'
                 }
             }
             //steps {
