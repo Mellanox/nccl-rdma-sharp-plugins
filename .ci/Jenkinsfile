@@ -11,10 +11,10 @@ pipeline {
     environment {
         WORK_DIR = "${env.WORKSPACE}"
         ARTEFACT_DIR = "${env.WORKSPACE}/artefacts"
-        UPSTREAM_JOB_NAME = ${env.UPSTREAM_JOB_NAME}"
-        UPSTREAM_BUILD_NUMBER = ${env.UPSTREAM_BUILD_NUMBER}"
-        UPSTREAM_ghprbGhRepository = ${env.UPSTREAM_ghprbGhRepository}"
-        UPSTREAM_ghprbPullId = ${env.UPSTREAM_ghprbPullId}"
+        UPSTREAM_JOB_NAME = "${env.UPSTREAM_JOB_NAME}"
+        UPSTREAM_BUILD_NUMBER = "${env.UPSTREAM_BUILD_NUMBER}"
+        UPSTREAM_ghprbGhRepository = "${env.UPSTREAM_ghprbGhRepository}"
+        UPSTREAM_ghprbPullId = "${env.UPSTREAM_ghprbPullId}"
     }
   
     stages {
