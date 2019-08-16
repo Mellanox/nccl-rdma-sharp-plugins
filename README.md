@@ -36,8 +36,8 @@ The following flags enabled to build with custom dependencies
 
 ```
   --with-verbs=PATH       Path to non-standard libibverbs installation
-  --with-nccl=PATH        Path to non-standard SHARP installation
-  --with-cuda=PATH         Path to non-standard CUDA installation
+  --with-sharp=PATH       Path to non-standard SHARP installation
+  --with-cuda=PATH        Path to non-standard CUDA installation
 ```
 
 
