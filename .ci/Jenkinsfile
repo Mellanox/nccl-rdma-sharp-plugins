@@ -11,10 +11,11 @@ pipeline {
     environment {
         WORK_DIR = "${env.WORKSPACE}"
         ARTEFACT_DIR = "${env.WORKSPACE}/artefacts"
-        UPSTREAM_JOB_NAME = "${env.UPSTREAM_JOB_NAME}"
-        UPSTREAM_BUILD_NUMBER = "${env.UPSTREAM_BUILD_NUMBER}"
-        UPSTREAM_ghprbGhRepository = "${env.UPSTREAM_ghprbGhRepository}"
-        UPSTREAM_ghprbPullId = "${env.UPSTREAM_ghprbPullId}"
+        // Variables for publish_artefacts_to_gist.py
+        UPSTREAM_JOB_NAME = "${env.JOB_NAME}"
+        UPSTREAM_BUILD_NUMBER = "${env.BUILD_NUMBER}"
+        UPSTREAM_ghprbGhRepository = "${env.ghprbGhRepository}"
+        UPSTREAM_ghprbPullId = "${env.ghprbPullId}"
     }
   
     stages {
