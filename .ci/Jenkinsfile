@@ -39,13 +39,13 @@ pipeline {
                 }
             }
         }
-        stage('Build nccl-rdma-sharp-plugins') {
+        stage('Build') {
             steps {
                 echo 'Building nccl-rdma-sharp-plugins...'
                 sh 'set -o pipefail; ${SRC_ROOT}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
             }
         }
-        stage('Test nccl-rdma-sharp-plugins') {
+        stage('Test') {
             steps {
                 echo 'Testing nccl-rdma-sharp-plugins...'
                 sh 'set -o pipefail; ${SRC_ROOT}/.ci/run_nccl_test.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
