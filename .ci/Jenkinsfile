@@ -14,7 +14,7 @@ pipeline {
         NFS_WORKSPACE = "/.autodirect/mtrswgwork/_ml_devops_team/workspace/ml-nccl-rdma-sharp-plugins-pr/${env.BUILD_NUMBER}"
         CUDA_HOME = "/hpc/local/oss/cuda10.0"
         NCCL_DIR = "/hpc/local/oss/nccl_2.3.5-2_with_cuda10.0_x86_64"
-        NCCL_TEST_DIR = "${NCCL_TEST_DIR}/nccl-tests"
+        NCCL_TESTS_DIR = "${NCCL_TESTS_DIR}/nccl-tests"
         // Variables for publish_artefacts_to_gist.py
         UPSTREAM_JOB_NAME = "${env.JOB_NAME}"
         UPSTREAM_BUILD_NUMBER = "${env.BUILD_NUMBER}"
@@ -31,7 +31,7 @@ pipeline {
                 echo "DEBUG: NFS_WORKSPACE = ${NFS_WORKSPACE}"
                 echo "DEBUG: CUDA_HOME = ${CUDA_HOME}"
                 echo "DEBUG: NCCL_DIR = ${NCCL_DIR}"
-                echo "DEBUG: NCCL_TEST_DIR = ${NCCL_TEST_DIR}"
+                echo "DEBUG: NCCL_TESTS_DIR = ${NCCL_TESTS_DIR}"
                 echo "DEBUG: UPSTREAM_JOB_NAME = ${UPSTREAM_JOB_NAME}"
                 echo "DEBUG: UPSTREAM_ghprbGhRepository = ${UPSTREAM_ghprbGhRepository}"
                 echo "DEBUG: UPSTREAM_ghprbPullId = ${UPSTREAM_ghprbPullId}"
@@ -41,8 +41,8 @@ pipeline {
         }
         stage('Checkout NCCL tests') {
             steps {
-                sh 'mkdir -p ${NCCL_TEST_DIR}'
-                dir("${NCCL_TEST_DIR}") {
+                sh 'mkdir -p ${NCCL_TESTS_DIR}'
+                dir("${NCCL_TESTS_DIR}") {
                     git branch: 'master',
                     url: 'https://github.com/NVIDIA/nccl-tests.git'
                 }
