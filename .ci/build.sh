@@ -7,7 +7,6 @@ fi
 
 echo "DEBUG: {SRC_ROOT} = ${SRC_ROOT}"
 
-# module load dev/cuda10.0
 module load hpcx-sharpv2-gcc
 
 echo "DEBUG: CUDA_HOME = ${CUDA_HOME}"
