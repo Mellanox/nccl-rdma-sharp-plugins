@@ -1,0 +1,60 @@
+#!/usr/bin/env groovy
+
+pipeline {
+    agent {label "clx-host-21514||clx-host-21518"}
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr:'10'))
+        timeout(time: 10, unit: 'MINUTES')
+    }
+
+    environment {
+        WORK_DIR = "${env.WORKSPACE}"
+    }
+  
+    stages {
+        stage('Checkout NCCL tests') {
+            steps {
+                //checkout([
+                //    $class: 'GitSCM',
+                //    branches: [[name: 'master']],
+                //    doGenerateSubmoduleConfigurations: false,
+                //    extensions: [[
+                //        $class: 'RelativeTargetDirectory',
+                //        relativeTargetDir: 'nccl-sharp'
+                //    ]],
+                //    submoduleCfg: [],
+                //    userRemoteConfigs: [[
+                //        url: 'git@gitlab.com:Mellanox/nccl-sharp.git'
+                //    ]]
+                //])
+                //checkout([
+                //    $class: 'GitSCM',
+                //    branches: [[name: 'master']],
+                //    doGenerateSubmoduleConfigurations: false,
+                //    extensions: [[
+                //        $class: 'RelativeTargetDirectory',
+                //        relativeTargetDir: 'nccl-sharp/nccl-tests'
+                //    ]],
+                //    submoduleCfg: [],
+                //    userRemoteConfigs: [[
+                //        url: 'https://github.com/NVIDIA/nccl-tests.git'
+                //    ]]
+                //])
+                sh 'pwd'
+                sh 'ls -al'
+            }
+        }
+        stage('Build') {
+            steps {
+                echo 'Building..'
+                sh '${WORK_DIR}/.ci/build.sh'
+            }
+        }
+        stage('Test') {
+            steps {
+                echo 'Testing..'
+            }
+        }
+    }
+}
