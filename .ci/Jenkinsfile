@@ -38,7 +38,7 @@ pipeline {
                 sh 'mkdir -p ${NCCL_SRC_DIR}'
                 dir("${NCCL_SRC_DIR}") {
                     git branch: 'master',
-                    url: 'https://gitlab.com/Mellanox/nccl-sharp.git'
+                    url: 'git@gitlab.com:Mellanox/nccl-sharp.git'
                 }
             }
         }
