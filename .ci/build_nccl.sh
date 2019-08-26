@@ -53,6 +53,7 @@ make -j src.build CUDA_HOME=${CUDA_HOME}
 if [ $? -ne 0 ]
 then
     echo "ERROR: 'make src.build' failed"
+    echo "FAIL"
     exit 1
 fi
 
@@ -77,6 +78,9 @@ then
     if [ $? -ne 0 ]
     then
         echo "ERROR: 'make pkg.txz.build' failed"
+        echo "FAIL"
         exit 1
     fi
 fi
+
+echo "PASS"
