@@ -1,11 +1,11 @@
 #!/usr/bin/env groovy
 
 pipeline {
-    agent {label "clx-host-21514||clx-host-21518"}
+    agent {label "ml-test-node-gpu"}
 
     options {
         buildDiscarder(logRotator(numToKeepStr:'10'))
-        timeout(time: 3, unit: 'MINUTES')
+        timeout(time: 5, unit: 'MINUTES')
         disableConcurrentBuilds()
     }
 
@@ -14,7 +14,9 @@ pipeline {
         ARTEFACT_DIR = "${env.WORKSPACE}/artefacts"
         NFS_WORKSPACE = "/.autodirect/mtrswgwork/_ml_devops_team/workspace/ml-nccl-rdma-sharp-plugins-pr/${env.BUILD_NUMBER}"
         CUDA_HOME = "/hpc/local/oss/cuda10.0"
-        NCCL_DIR = "/.autodirect/mtrswgwork/artemry/ci_tools_do_not_remove/nccl-sharp-stable-2019-08-16/build"
+        // NCCL_DIR = "/.autodirect/mtrswgwork/artemry/ci_tools_do_not_remove/nccl-sharp-stable-2019-08-16/build"
+        NCCL_SRC_DIR = "${NFS_WORKSPACE}/nccl"
+        NCCL_DIR = "${NCCL_SRC_DIR}/build"
         NCCL_TESTS_DIR = "${NFS_WORKSPACE}/nccl-tests"
         // Variables for publish_artefacts_to_gist.py
         UPSTREAM_JOB_NAME = "${env.JOB_NAME}"
@@ -22,13 +24,34 @@ pipeline {
         UPSTREAM_ghprbGhRepository = "${env.ghprbGhRepository}"
         UPSTREAM_ghprbPullId = "${env.ghprbPullId}"
     }
-  
+
     stages {
         stage('Preparations') {
             steps {
                 echo 'Preparations...'
                 sh 'mkdir -p ${ARTEFACT_DIR}'
                 sh 'mkdir -p ${NFS_WORKSPACE}'
+            }
+        }
+        stage('Checkout NCCL') {
+            steps {
+                sh 'mkdir -p ${NCCL_SRC_DIR}'
+                dir("${NCCL_SRC_DIR}") {
+                    git branch: 'master',
+                    url: 'https://gitlab.com/Mellanox/nccl-sharp.git'
+                }
+            }
+        }
+        stage('Build NCCL') {
+            steps {
+                echo 'Building NCCL...'
+                sh 'set -o pipefail; ${SRC_ROOT}/.ci/build_nccl.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl.log'
+            }
+        }
+        stage('Build nccl-rdma-sharp-plugins') {
+            steps {
+                echo 'Building nccl-rdma-sharp-plugins...'
+                sh 'set -o pipefail; ${SRC_ROOT}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
             }
         }
         stage('Checkout NCCL tests') {
@@ -38,12 +61,6 @@ pipeline {
                     git branch: 'master',
                     url: 'https://github.com/NVIDIA/nccl-tests.git'
                 }
-            }
-        }
-        stage('Build') {
-            steps {
-                echo 'Building nccl-rdma-sharp-plugins...'
-                sh 'set -o pipefail; ${SRC_ROOT}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
             }
         }
         stage('Test') {

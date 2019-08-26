@@ -11,7 +11,7 @@ HOSTNAME=`hostname -s`
 echo "DEBUG: HOSTNAME = $HOSTNAME"
 
 module load dev/cuda10.0
-module load hpcx-sharpv2-gcc
+module load hpcx-gcc
 
 SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
 echo "DEBUG: SCRIPT_DIR = ${SCRIPT_DIR}"
