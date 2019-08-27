@@ -10,18 +10,16 @@ pipeline {
     }
 
     environment {
-        VAR1 = "${env.WORKSPACE}"
-        VAR2 = "${WORKSPACE}"
-        ARTEFACT_DIR = "${env.WORKSPACE}/artefacts"
-        NFS_WORKSPACE = "/.autodirect/mtrswgwork/_ml_devops_team/workspace/ml-nccl-rdma-sharp-plugins-pr/${env.BUILD_NUMBER}"
-        NCCL_SRC_DIR = "${env.WORKSPACE}/nccl"
+        ARTEFACT_DIR = "${WORKSPACE}/artefacts"
+        NFS_WORKSPACE = "/.autodirect/mtrswgwork/_ml_devops_team/workspace/ml-nccl-rdma-sharp-plugins-pr/${BUILD_NUMBER}"
+        NCCL_SRC_DIR = "${WORKSPACE}/nccl"
         NCCL_DIR = "${NFS_WORKSPACE}/nccl"
         NCCL_TESTS_DIR = "${NFS_WORKSPACE}/nccl-tests"
         // Variables for publish_artefacts_to_gist.py
-        UPSTREAM_JOB_NAME = "${env.JOB_NAME}"
-        UPSTREAM_BUILD_NUMBER = "${env.BUILD_NUMBER}"
-        UPSTREAM_ghprbGhRepository = "${env.ghprbGhRepository}"
-        UPSTREAM_ghprbPullId = "${env.ghprbPullId}"
+        UPSTREAM_JOB_NAME = "${JOB_NAME}"
+        UPSTREAM_BUILD_NUMBER = "${BUILD_NUMBER}"
+        UPSTREAM_ghprbGhRepository = "${ghprbGhRepository}"
+        UPSTREAM_ghprbPullId = "${ghprbPullId}"
     }
 
     stages {
@@ -33,8 +31,6 @@ pipeline {
 
                 echo "DEBUG: VAR1 = $VAR1"
                 echo "DEBUG: VAR2 = $VAR2"
-                echo "DEBUG: env.VAR1 = ${env.VAR1}"
-                echo "DEBUG: env.VAR2 = ${env.VAR2}"
             }
         }
         stage('Checkout NCCL') {
@@ -49,7 +45,7 @@ pipeline {
         stage('Build NCCL') {
             steps {
                 echo 'Building NCCL...'
-                sh 'set -o pipefail; ${env.WORKSPACE}/.ci/build_nccl.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl.log'
+                sh 'set -o pipefail; ${WORKSPACE}/.ci/build_nccl.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl.log'
                 sh 'mkdir -p ${NCCL_DIR}'
                 sh 'cp -R ${NCCL_SRC_DIR}/build/* ${NCCL_DIR}'
                 sh 'find ${NCCL_DIR} -type f'
@@ -58,7 +54,7 @@ pipeline {
         stage('Build nccl-rdma-sharp-plugins') {
             steps {
                 echo 'Building nccl-rdma-sharp-plugins...'
-                sh 'set -o pipefail; ${env.WORKSPACE}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
+                sh 'set -o pipefail; ${WORKSPACE}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
             }
         }
         stage('Checkout NCCL tests') {
@@ -73,7 +69,7 @@ pipeline {
         stage('Test') {
             steps {
                 echo 'Testing nccl-rdma-sharp-plugins...'
-                sh 'set -o pipefail; ${env.WORKSPACE}/.ci/run_nccl_test.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
+                sh 'set -o pipefail; ${WORKSPACE}/.ci/run_nccl_test.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
             }
         }
     }
