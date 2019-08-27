@@ -23,9 +23,6 @@ pipeline {
                 echo 'Preparations...'
                 sh 'mkdir -p ${ARTEFACT_DIR}'
                 sh 'mkdir -p ${NFS_WORKSPACE}'
-
-                echo "DEBUG: VAR1 = $VAR1"
-                echo "DEBUG: VAR2 = $VAR2"
             }
         }
         stage('Checkout NCCL') {
