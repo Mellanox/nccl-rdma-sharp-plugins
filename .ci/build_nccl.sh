@@ -7,6 +7,9 @@ then
     set -x
 fi
 
+# TODO debug
+exit 777
+
 HOSTNAME=`hostname -s`
 echo "DEBUG: HOSTNAME = $HOSTNAME"
 

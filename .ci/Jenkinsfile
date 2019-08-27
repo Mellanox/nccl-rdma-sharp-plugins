@@ -1,5 +1,7 @@
 #!/usr/bin/env groovy
 
+// Verified with Jenkins v2.164.3
+
 pipeline {
     agent {label "ml-test-node-gpu"}
 
