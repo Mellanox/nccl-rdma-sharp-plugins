@@ -11,6 +11,4 @@ EXTRA_DIST += autogen.sh
 EXTRA_DIST += include
 EXTRA_DIST += debian
 EXTRA_DIST += nccl-rdma-sharp-plugins.spec
-EXTRA_DIST += nccl-rdma-sharp-plugins.spec.in
-
 

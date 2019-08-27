@@ -81,8 +81,11 @@ AC_ARG_WITH([sharp],
             AC_HELP_STRING([--with-sharp=PATH], [Path to non-standard SHARP installation]),
              [CFLAGS="-I$withval/include $CFLAGS"
               LDFLAGS="-L$withval/lib $LDFLAGS"],
-             [CFLAGS="-I/opt/mellanox/sharp/include $CFLAGS"
-              LDFLAGS="-L/opt/mellanox/sharp/lib $LDFLAGS"])
+             [AS_IF([test -d "$HPCX_SHARP_DIR"],
+                    [CFLAGS="-I$HPCX_SHARP_DIR/include $CFLAGS"
+                     LDFLAGS="-L$HPCX_SHARP_DIR/lib $LDFLAGS"],
+                     [CFLAGS="-I/opt/mellanox/sharp/include $CFLAGS"
+                     LDFLAGS="-L/opt/mellanox/sharp/lib $LDFLAGS"])])
 
 AC_CHECK_HEADER([sharp/api/sharp.h], [],
                 [AC_MSG_FAILURE([sharp.h header file not found])])
