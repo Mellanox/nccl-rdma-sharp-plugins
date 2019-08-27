@@ -5,30 +5,31 @@ then
     set -x
 fi
 
-echo "DEBUG: {SRC_ROOT} = ${SRC_ROOT}"
+echo "DEBUG: WORKSPACE = ${WORKSPACE}"
 
+module load dev/cuda10.0
 module load hpcx-gcc
 
 echo "DEBUG: CUDA_HOME = ${CUDA_HOME}"
 echo "DEBUG: HPCX_SHARP_DIR = ${HPCX_SHARP_DIR}"
 
-cd ${SRC_ROOT}
+cd ${WORKSPACE}
 
-${SRC_ROOT}/autogen.sh
+${WORKSPACE}/autogen.sh
 if [ $? -ne 0 ]
 then
-    echo "ERROR: ${SRC_ROOT}/autogen.sh failed"
+    echo "ERROR: ${WORKSPACE}/autogen.sh failed"
     echo "FAIL"
     exit 1
 fi
 
-${SRC_ROOT}/configure \
-    --prefix=${SRC_ROOT}/_install \
+${WORKSPACE}/configure \
+    --prefix=${WORKSPACE}/_install \
     --with-cuda=${CUDA_HOME} \
     --with-sharp=${HPCX_SHARP_DIR}
 if [ $? -ne 0 ]
 then
-    echo "ERROR: ${SRC_ROOT}/configure failed"
+    echo "ERROR: ${WORKSPACE}/configure failed"
     echo "FAIL"
     exit 1
 fi
@@ -41,7 +42,7 @@ then
     exit 1
 fi
 
-echo "DEBUG: ${SRC_ROOT}/_install:"
-find ${SRC_ROOT}/_install -type f
+echo "DEBUG: ${WORKSPACE}/_install:"
+find ${WORKSPACE}/_install -type f
 
 echo "PASS"

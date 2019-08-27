@@ -5,17 +5,16 @@ pipeline {
 
     options {
         buildDiscarder(logRotator(numToKeepStr:'10'))
-        timeout(time: 10, unit: 'MINUTES')
+        timeout(time: 15, unit: 'MINUTES')
         disableConcurrentBuilds()
     }
 
     environment {
-        SRC_ROOT = "${env.WORKSPACE}"
+        VAR1 = "${env.WORKSPACE}"
+        VAR2 = "${WORKSPACE}"
         ARTEFACT_DIR = "${env.WORKSPACE}/artefacts"
         NFS_WORKSPACE = "/.autodirect/mtrswgwork/_ml_devops_team/workspace/ml-nccl-rdma-sharp-plugins-pr/${env.BUILD_NUMBER}"
-        CUDA_HOME = "/hpc/local/oss/cuda10.0"
-        // NCCL_DIR = "/.autodirect/mtrswgwork/artemry/ci_tools_do_not_remove/nccl-sharp-stable-2019-08-16/build"
-        NCCL_SRC_DIR = "${SRC_ROOT}/nccl"
+        NCCL_SRC_DIR = "${env.WORKSPACE}/nccl"
         NCCL_DIR = "${NFS_WORKSPACE}/nccl"
         NCCL_TESTS_DIR = "${NFS_WORKSPACE}/nccl-tests"
         // Variables for publish_artefacts_to_gist.py
@@ -31,6 +30,11 @@ pipeline {
                 echo 'Preparations...'
                 sh 'mkdir -p ${ARTEFACT_DIR}'
                 sh 'mkdir -p ${NFS_WORKSPACE}'
+
+                echo "DEBUG: VAR1 = $VAR1"
+                echo "DEBUG: VAR2 = $VAR2"
+                echo "DEBUG: env.VAR1 = ${env.VAR1}"
+                echo "DEBUG: env.VAR2 = ${env.VAR2}"
             }
         }
         stage('Checkout NCCL') {
@@ -45,7 +49,7 @@ pipeline {
         stage('Build NCCL') {
             steps {
                 echo 'Building NCCL...'
-                sh 'set -o pipefail; ${SRC_ROOT}/.ci/build_nccl.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl.log'
+                sh 'set -o pipefail; ${env.WORKSPACE}/.ci/build_nccl.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl.log'
                 sh 'mkdir -p ${NCCL_DIR}'
                 sh 'cp -R ${NCCL_SRC_DIR}/build/* ${NCCL_DIR}'
                 sh 'find ${NCCL_DIR} -type f'
@@ -54,7 +58,7 @@ pipeline {
         stage('Build nccl-rdma-sharp-plugins') {
             steps {
                 echo 'Building nccl-rdma-sharp-plugins...'
-                sh 'set -o pipefail; ${SRC_ROOT}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
+                sh 'set -o pipefail; ${env.WORKSPACE}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
             }
         }
         stage('Checkout NCCL tests') {
@@ -69,7 +73,7 @@ pipeline {
         stage('Test') {
             steps {
                 echo 'Testing nccl-rdma-sharp-plugins...'
-                sh 'set -o pipefail; ${SRC_ROOT}/.ci/run_nccl_test.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
+                sh 'set -o pipefail; ${env.WORKSPACE}/.ci/run_nccl_test.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
             }
         }
     }
@@ -77,7 +81,7 @@ pipeline {
         always {
             echo 'Post-actions...'
             echo 'Publish artefacts...'
-            sh 'rm -rf ${SRC_ROOT}/gist_tmp'
+            sh 'rm -rf ${WORKSPACE}/gist_tmp'
             sh 'ls -al ${ARTEFACT_DIR}'
             sh 'python /.autodirect/mtrswgwork/artemry/ci_tools_do_not_remove/publish_artefacts_to_gist.py'
         }

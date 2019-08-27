@@ -16,13 +16,13 @@ module load hpcx-gcc
 SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
 echo "DEBUG: SCRIPT_DIR = ${SCRIPT_DIR}"
 
-echo "DEBUG: SRC_ROOT = ${SRC_ROOT}"
+echo "DEBUG: WORKSPACE = ${WORKSPACE}"
 
-if [ -z "${SRC_ROOT}" ]
+if [ -z "${WORKSPACE}" ]
 then
-    echo "WARNING: SRC_ROOT is empty"
-    SRC_ROOT=`cd ${SCRIPT_DIR}/../; pwd -P`
-    echo "DEBUG: SRC_ROOT = ${SRC_ROOT}"
+    echo "WARNING: WORKSPACE is empty"
+    WORKSPACE=`cd ${SCRIPT_DIR}/../; pwd -P`
+    echo "DEBUG: WORKSPACE = ${WORKSPACE}"
 fi
 
 if [ -z "${SHARP_DIR}" ]
