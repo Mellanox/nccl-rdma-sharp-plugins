@@ -39,7 +39,7 @@ pipeline {
         stage('Build NCCL') {
             steps {
                 echo 'Building NCCL...'
-                sh '${WORKSPACE}/.ci/build_nccl.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl.log'
+                sh 'set -o pipefail; ${WORKSPACE}/.ci/build_nccl.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl.log'
                 sh 'mkdir -p ${NCCL_DIR}'
                 sh 'cp -R ${NCCL_SRC_DIR}/build/* ${NCCL_DIR}'
                 sh 'find ${NCCL_DIR} -type f'
