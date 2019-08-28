@@ -13,7 +13,7 @@ pipeline {
 
     environment {
         ARTEFACT_DIR = "${WORKSPACE}/artefacts"
-        NFS_WORKSPACE = "/.autodirect/mtrswgwork/_ml_devops_team/workspace/ml-nccl-rdma-sharp-plugins-pr/${BUILD_NUMBER}"
+        NFS_WORKSPACE = "${NFS_WORKSPACE_ROOT}/ml-nccl-rdma-sharp-plugins-pr/${BUILD_NUMBER}"
         NCCL_SRC_DIR = "${WORKSPACE}/nccl"
         NCCL_DIR = "${NFS_WORKSPACE}/nccl"
         NCCL_TESTS_DIR = "${NFS_WORKSPACE}/nccl-tests"
@@ -73,12 +73,7 @@ pipeline {
             echo 'Publish artefacts...'
             sh 'ls -al ${ARTEFACT_DIR}'
             sh '''#!/bin/bash -l
-                module avail
-                '''
-            sh '''#!/bin/bash -l
                 module load ml/ci-tools
-                echo $PATH
-                which publish_artefacts_to_gist.py
                 env \
                     UPSTREAM_JOB_NAME=${JOB_NAME} \
                     UPSTREAM_BUILD_NUMBER=${BUILD_NUMBER} \
