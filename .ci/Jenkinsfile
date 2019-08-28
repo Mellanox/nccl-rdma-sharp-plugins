@@ -73,7 +73,16 @@ pipeline {
             echo 'Publish artefacts...'
             sh 'ls -al ${ARTEFACT_DIR}'
             sh 'module avail'
-            sh 'module load ml/ci-tools; env UPSTREAM_JOB_NAME=${JOB_NAME} UPSTREAM_BUILD_NUMBER=${BUILD_NUMBER} UPSTREAM_ghprbGhRepository=${ghprbGhRepository} UPSTREAM_ghprbPullId=${ghprbPullId} python publish_artefacts_to_gist.py'
+            sh '''
+                #!/bin/bash -l
+                module load ml/ci-tools
+                env \
+                    UPSTREAM_JOB_NAME=${JOB_NAME} \
+                    UPSTREAM_BUILD_NUMBER=${BUILD_NUMBER} \
+                    UPSTREAM_ghprbGhRepository=${ghprbGhRepository} \
+                    UPSTREAM_ghprbPullId=${ghprbPullId} \
+                    python publish_artefacts_to_gist.py
+               '''
         }
     }
 }

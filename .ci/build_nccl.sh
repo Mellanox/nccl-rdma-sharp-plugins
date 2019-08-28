@@ -12,9 +12,6 @@ fi
 HOSTNAME=`hostname -s`
 echo "DEBUG: HOSTNAME = $HOSTNAME"
 
-# TODO debug
-exit 777
-
 module load dev/cuda10.0
 module load hpcx-gcc
 
