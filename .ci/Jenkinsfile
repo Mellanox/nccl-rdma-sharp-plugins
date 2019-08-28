@@ -72,7 +72,9 @@ pipeline {
             echo 'Post-actions...'
             echo 'Publish artefacts...'
             sh 'ls -al ${ARTEFACT_DIR}'
-            sh 'module avail'
+            sh '''#!/bin/bash -l
+                module avail
+                '''
             sh '''#!/bin/bash -l
                 module load ml/ci-tools
                 env \
