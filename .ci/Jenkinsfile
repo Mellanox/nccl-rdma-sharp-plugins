@@ -71,7 +71,6 @@ pipeline {
         always {
             echo 'Post-actions...'
             echo 'Publish artefacts...'
-            sh 'rm -rf ${WORKSPACE}/gist_tmp'
             sh 'ls -al ${ARTEFACT_DIR}'
             sh 'env UPSTREAM_JOB_NAME=${JOB_NAME} UPSTREAM_BUILD_NUMBER=${BUILD_NUMBER} UPSTREAM_ghprbGhRepository=${ghprbGhRepository} UPSTREAM_ghprbPullId=${ghprbPullId} python /.autodirect/mtrswgwork/artemry/ci_tools_do_not_remove/publish_artefacts_to_gist.py'
         }
