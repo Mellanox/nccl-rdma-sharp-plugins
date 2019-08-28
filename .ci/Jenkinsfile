@@ -2,6 +2,9 @@
 
 // Verified with Jenkins v2.164.3
 
+// TODO:
+// 1. Calculate taskset/affinity for the scripts based on total number of jenkins executors
+
 pipeline {
     agent {label "ml-test-node-gpu"}
 
