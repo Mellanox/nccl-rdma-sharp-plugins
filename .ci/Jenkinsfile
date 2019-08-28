@@ -77,12 +77,14 @@ pipeline {
                 '''
             sh '''#!/bin/bash -l
                 module load ml/ci-tools
+                echo $PATH
+                which publish_artefacts_to_gist.py
                 env \
                     UPSTREAM_JOB_NAME=${JOB_NAME} \
                     UPSTREAM_BUILD_NUMBER=${BUILD_NUMBER} \
                     UPSTREAM_ghprbGhRepository=${ghprbGhRepository} \
                     UPSTREAM_ghprbPullId=${ghprbPullId} \
-                    python publish_artefacts_to_gist.py
+                    publish_artefacts_to_gist.py
                '''
         }
     }
