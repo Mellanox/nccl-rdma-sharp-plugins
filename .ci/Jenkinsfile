@@ -1,27 +1,25 @@
 #!/usr/bin/env groovy
 
+// Verified with Jenkins v2.164.3
+
+// TODO:
+// 1. Calculate taskset/affinity for the scripts based on total number of jenkins executors
+
 pipeline {
     agent {label "ml-test-node-gpu"}
 
     options {
         buildDiscarder(logRotator(numToKeepStr:'10'))
-        timeout(time: 10, unit: 'MINUTES')
+        timeout(time: 15, unit: 'MINUTES')
         disableConcurrentBuilds()
     }
 
     environment {
-        SRC_ROOT = "${env.WORKSPACE}"
-        ARTEFACT_DIR = "${env.WORKSPACE}/artefacts"
-        NFS_WORKSPACE = "/.autodirect/mtrswgwork/_ml_devops_team/workspace/ml-nccl-rdma-sharp-plugins-pr/${env.BUILD_NUMBER}"
-        CUDA_HOME = "/hpc/local/oss/cuda10.0"
-        NCCL_SRC_DIR = "${SRC_ROOT}/nccl"
+        ARTEFACT_DIR = "${WORKSPACE}/artefacts"
+        NFS_WORKSPACE = "${NFS_WORKSPACE_ROOT}/ml-nccl-rdma-sharp-plugins-pr/${BUILD_NUMBER}"
+        NCCL_SRC_DIR = "${WORKSPACE}/nccl"
         NCCL_DIR = "${NFS_WORKSPACE}/nccl"
         NCCL_TESTS_DIR = "${NFS_WORKSPACE}/nccl-tests"
-        // Variables for publish_artefacts_to_gist.py
-        UPSTREAM_JOB_NAME = "${env.JOB_NAME}"
-        UPSTREAM_BUILD_NUMBER = "${env.BUILD_NUMBER}"
-        UPSTREAM_ghprbGhRepository = "${env.ghprbGhRepository}"
-        UPSTREAM_ghprbPullId = "${env.ghprbPullId}"
     }
 
     stages {
@@ -44,7 +42,7 @@ pipeline {
         stage('Build NCCL') {
             steps {
                 echo 'Building NCCL...'
-                sh 'set -o pipefail; ${SRC_ROOT}/.ci/build_nccl.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl.log'
+                sh 'set -o pipefail; ${WORKSPACE}/.ci/build_nccl.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl.log'
                 sh 'mkdir -p ${NCCL_DIR}'
                 sh 'cp -R ${NCCL_SRC_DIR}/build/* ${NCCL_DIR}'
                 sh 'find ${NCCL_DIR} -type f'
@@ -53,7 +51,7 @@ pipeline {
         stage('Build nccl-rdma-sharp-plugins') {
             steps {
                 echo 'Building nccl-rdma-sharp-plugins...'
-                sh 'set -o pipefail; ${SRC_ROOT}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
+                sh 'set -o pipefail; ${WORKSPACE}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
             }
         }
         stage('Checkout NCCL tests') {
@@ -68,7 +66,7 @@ pipeline {
         stage('Test') {
             steps {
                 echo 'Testing nccl-rdma-sharp-plugins...'
-                sh 'set -o pipefail; ${SRC_ROOT}/.ci/run_nccl_test.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
+                sh 'set -o pipefail; ${WORKSPACE}/.ci/run_nccl_test.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
             }
         }
     }
@@ -76,9 +74,16 @@ pipeline {
         always {
             echo 'Post-actions...'
             echo 'Publish artefacts...'
-            sh 'rm -rf ${SRC_ROOT}/gist_tmp'
             sh 'ls -al ${ARTEFACT_DIR}'
-            sh 'python /.autodirect/mtrswgwork/artemry/ci_tools_do_not_remove/publish_artefacts_to_gist.py'
+            sh '''#!/bin/bash -l
+                module load ml/ci-tools
+                env \
+                    UPSTREAM_JOB_NAME=${JOB_NAME} \
+                    UPSTREAM_BUILD_NUMBER=${BUILD_NUMBER} \
+                    UPSTREAM_ghprbGhRepository=${ghprbGhRepository} \
+                    UPSTREAM_ghprbPullId=${ghprbPullId} \
+                    publish_artefacts_to_gist.py
+               '''
         }
     }
 }
