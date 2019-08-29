@@ -36,7 +36,7 @@ pipeline {
         stage('Checkout NCCL') {
             steps {
                 dir("${NCCL_SRC_DIR}") {
-                    git branch: ${NCCL_GIT_BRANCH},
+                    git branch: '${NCCL_GIT_BRANCH}',
                     url: '${NCCL_GIT_URL}'
                 }
             }
