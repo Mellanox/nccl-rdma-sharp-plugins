@@ -1,7 +1,5 @@
 #!/bin/bash -leE
 
-# '-l' - make bash act as if it had been invoked as a login shell (modules are initialized in .bashrc)
-
 set -o pipefail
 
 if [ -n "$DEBUG" ]

@@ -73,17 +73,7 @@ pipeline {
     post {
         always {
             echo 'Post-actions...'
-            echo 'Publish artefacts...'
-            sh 'ls -al ${ARTEFACT_DIR}'
-            sh '''#!/bin/bash -l
-                module load ml/ci-tools
-                env \
-                    UPSTREAM_JOB_NAME=${JOB_NAME} \
-                    UPSTREAM_BUILD_NUMBER=${BUILD_NUMBER} \
-                    UPSTREAM_ghprbGhRepository=${ghprbGhRepository} \
-                    UPSTREAM_ghprbPullId=${ghprbPullId} \
-                    publish_artefacts_to_gist.py
-               '''
+            sh '${WORKSPACE}/.ci/publish_artefacts.sh'
         }
     }
 }
