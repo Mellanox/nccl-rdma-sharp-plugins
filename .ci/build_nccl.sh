@@ -23,6 +23,11 @@ then
     exit 1
 fi
 
+if [ -n "$DEBUG" ]
+then
+    find ${NCCL_SRC_DIR}/build -type f
+fi
+
 if [ "${ENABLE_PACKAGING}" -eq 1 ]
 then
     make pkg.txz.build

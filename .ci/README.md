@@ -5,13 +5,15 @@ CI status and artefacts (log files) are published within the PR comments.
 ## Description
 CI includes the following steps:
 * Build nccl-rdma-sharp-plugins
-* Test nccl-rdma-sharp-plugins with [NCCL tests](https://github.com/nvidia/nccl-tests). The tests are run with internal stable version of [NVIDIA's NCCL](https://github.com/NVIDIA/nccl) library
+* Test nccl-rdma-sharp-plugins with [NCCL tests](https://github.com/nvidia/nccl-tests). 
+The tests are run with [NVIDIA's NCCL](https://github.com/NVIDIA/nccl) library built within CI from the internal repository.
 ### Test Environment
 CI is run in the Mellanox lab on a 2-node cluster with the following parameters:
-* Hardware
-  * IB: 1x ConnectX-6 HCA (connected to Mellanox Quantum™ HDR switch)
-  * GPU: 1x Nvidia Tesla K40m
-* Software
-  * MLNX_OFED 4.6-1.0.1.1
-  * Ubuntu 16.04.6
-  * Internal stable HPC-X and SHARP versions
+
+Hardware
+* IB: 1x ConnectX-6 HCA (connected to Mellanox Quantum™ HDR switch)
+* GPU: 1x Nvidia Tesla K40m
+
+Software
+* Ubuntu 16.04.6
+* Internal stable MLNX_OFED, HPC-X and SHARP versions
