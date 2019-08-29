@@ -10,8 +10,8 @@ fi
 module load dev/cuda10.0
 module load hpcx-gcc
 
-SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
-echo "DEBUG: SCRIPT_DIR = ${SCRIPT_DIR}"
+TOP_DIR="$(git rev-parse --show-toplevel)"
+echo "DEBUG: TOP_DIR = ${TOP_DIR}"
 
 echo "DEBUG: CUDA_HOME = ${CUDA_HOME}"
 echo "DEBUG: HPCX_SHARP_DIR = ${HPCX_SHARP_DIR}"
@@ -24,7 +24,7 @@ echo "DEBUG: HOSTNAME = $HOSTNAME"
 if [ -z "${WORKSPACE}" ]
 then
     echo "WARNING: WORKSPACE is empty"
-    WORKSPACE=`cd ${SCRIPT_DIR}/../; pwd -P`
+    WORKSPACE="${TOP_DIR}"
     echo "DEBUG: WORKSPACE = ${WORKSPACE}"
 fi
 

@@ -21,17 +21,6 @@ then
     exit 1
 fi
 
-#
-# Set affinity to 2 cores according to Jenkins executor number
-#
-# if [ -n "$EXECUTOR_NUMBER" ]
-# then
-    # AFFINITY="taskset -c $(( 2 * EXECUTOR_NUMBER ))","$(( 2 * EXECUTOR_NUMBER + 1))"
-# else
-    # AFFINITY=""
-# fi
-# echo "DEBUG: AFFINITY = $AFFINITY"
-
 HOSTFILE=${CI_DIR}/cfg/$HOSTNAME/hostfile
 NP=2
 IB_DEV="mlx5_0:1"
