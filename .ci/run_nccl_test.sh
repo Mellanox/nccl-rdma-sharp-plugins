@@ -36,7 +36,6 @@ MPIRUN_OPTIONS_COMMON="\
 -x HCOLL_ENABLE_SHARP=0 \
 -x HCOLL_ENABLE_MCAST_ALL=0 \
 -mca pml ucx \
--mca btl self,tcp \
 -mca coll_hcoll_enable 1 \
 --map-by node \
 --bind-to none \
