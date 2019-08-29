@@ -36,7 +36,6 @@ MPIRUN_OPTIONS_COMMON="\
 -x HCOLL_ENABLE_SHARP=0 \
 -x HCOLL_ENABLE_MCAST_ALL=0 \
 -mca pml ucx \
--mca btl self,tcp \
 -mca coll_hcoll_enable 1 \
 --map-by node \
 --bind-to none \
@@ -87,7 +86,8 @@ fi
 
 # Build NCCL-TESTS
 cd ${NCCL_TESTS_DIR}
-make clean
+make -j clean
+
 make -j CUDA_HOME="${CUDA_HOME}" NCCL_HOME="${NCCL_DIR}" MPI=1 MPI_HOME="${MPI_HOME}"
 
 export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_PLUGIN_DIR}/lib:${SHARP_DIR}/lib:${LD_LIBRARY_PATH}"

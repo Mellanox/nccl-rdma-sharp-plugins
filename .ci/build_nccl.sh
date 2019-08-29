@@ -12,7 +12,7 @@ fi
 
 # Clean
 cd ${NCCL_SRC_DIR}
-make clean
+make -j clean
 
 # Build NCCL
 make -j src.build CUDA_HOME=${CUDA_HOME}
