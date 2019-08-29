@@ -4,6 +4,10 @@
 
 // TODO:
 // 1. Calculate taskset/affinity for the scripts based on total number of jenkins executors
+// 2. Enable SHARP test scenarios (including SHARP configuration stage)
+// 3. NCCL/CUDA/SHARP dependencies should be parameterized
+// 4. HPC-X OS/MOFED support matrix should be covered (e.g. docker-based)
+// 5. Add signal handlers in the scripts (e.g. to correctly handle Jenkins abort by timeout situations)
 
 pipeline {
     agent {label "ml-test-node-gpu"}
