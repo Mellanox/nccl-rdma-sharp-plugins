@@ -1,17 +1,9 @@
 #!/bin/bash -leE
 
-if [ -z "$DEBUG" ]
-then
-    set -x
-fi
+SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
+echo "DEBUG: SCRIPT_DIR = ${SCRIPT_DIR}"
 
-echo "DEBUG: WORKSPACE = ${WORKSPACE}"
-
-module load dev/cuda10.0
-module load hpcx-gcc
-
-echo "DEBUG: CUDA_HOME = ${CUDA_HOME}"
-echo "DEBUG: HPCX_SHARP_DIR = ${HPCX_SHARP_DIR}"
+. ${SCRIPT_DIR}/settings.sh
 
 cd ${WORKSPACE}
 

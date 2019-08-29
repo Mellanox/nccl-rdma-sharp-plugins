@@ -1,66 +1,22 @@
 #!/bin/bash -leE
 
-set -o pipefail
-
-if [ -n "$DEBUG" ]
-then
-    set -x
-fi
-
-HOSTNAME=`hostname -s`
-echo "DEBUG: HOSTNAME = $HOSTNAME"
-
-module load dev/cuda10.0
-module load hpcx-gcc
-
 SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
 echo "DEBUG: SCRIPT_DIR = ${SCRIPT_DIR}"
 
-echo "DEBUG: WORKSPACE = ${WORKSPACE}"
-
-if [ -z "${WORKSPACE}" ]
-then
-    echo "WARNING: WORKSPACE is empty"
-    WORKSPACE=`cd ${SCRIPT_DIR}/../; pwd -P`
-    echo "DEBUG: WORKSPACE = ${WORKSPACE}"
-fi
-
-CI_DIR="${WORKSPACE}/.ci"
-NCCL_PLUGIN_DIR="${WORKSPACE}/_install"
-
-if [ -z "${SHARP_DIR}" ]
-then
-    if [ -z "${HPCX_SHARP_DIR}" ]
-    then
-        echo "ERROR: SHARP_DIR and HPCX_SHARP_DIR not set"
-        echo "FAIL"
-        exit 1
-    else
-        SHARP_DIR="${HPCX_SHARP_DIR}"
-    fi
-fi
-
-echo "DEBUG: SHARP_DIR = ${SHARP_DIR}"
-
-if [ ! -d "${HPCX_DIR}" ]
-then
-    echo "ERROR: ${HPCX_DIR} does not exist or not accessible"
-    echo "FAIL"
-    exit 1
-fi
+. ${SCRIPT_DIR}/settings.sh
 
 GLOBAL_TEST_STATUS=0
 
 if [ -z "${NCCL_DIR}" ]
 then
-    echo "ERROR: NCCL_DIR is empty"
+    echo "ERROR: NCCL_DIR is not defined"
     echo "FAIL"
     exit 1
 fi
 
 if [ -z "${NCCL_TESTS_DIR}" ]
 then
-    echo "ERROR: NCCL_TESTS_DIR is empty"
+    echo "ERROR: NCCL_TESTS_DIR is not defined"
     echo "FAIL"
     exit 1
 fi
