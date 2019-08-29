@@ -21,17 +21,6 @@ then
     exit 1
 fi
 
-#
-# Set affinity to 2 cores according to Jenkins executor number
-#
-# if [ -n "$EXECUTOR_NUMBER" ]
-# then
-    # AFFINITY="taskset -c $(( 2 * EXECUTOR_NUMBER ))","$(( 2 * EXECUTOR_NUMBER + 1))"
-# else
-    # AFFINITY=""
-# fi
-# echo "DEBUG: AFFINITY = $AFFINITY"
-
 HOSTFILE=${CI_DIR}/cfg/$HOSTNAME/hostfile
 NP=2
 IB_DEV="mlx5_0:1"
@@ -98,7 +87,8 @@ fi
 
 # Build NCCL-TESTS
 cd ${NCCL_TESTS_DIR}
-make clean
+make -j clean
+
 make -j CUDA_HOME="${CUDA_HOME}" NCCL_HOME="${NCCL_DIR}" MPI=1 MPI_HOME="${MPI_HOME}"
 
 export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_PLUGIN_DIR}/lib:${SHARP_DIR}/lib:${LD_LIBRARY_PATH}"

@@ -12,7 +12,7 @@ fi
 
 # Clean
 cd ${NCCL_SRC_DIR}
-make clean
+make -j clean
 
 # Build NCCL
 make -j src.build CUDA_HOME=${CUDA_HOME}
@@ -21,6 +21,11 @@ then
     echo "ERROR: 'make src.build' failed"
     echo "FAIL"
     exit 1
+fi
+
+if [ -n "$DEBUG" ]
+then
+    find ${NCCL_SRC_DIR}/build -type f
 fi
 
 if [ "${ENABLE_PACKAGING}" -eq 1 ]

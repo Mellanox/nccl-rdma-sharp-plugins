@@ -4,6 +4,10 @@
 
 // TODO:
 // 1. Calculate taskset/affinity for the scripts based on total number of jenkins executors
+// 2. Enable SHARP test scenarios (including SHARP configuration stage)
+// 3. NCCL/CUDA/SHARP dependencies should be parameterized
+// 4. HPC-X OS/MOFED support matrix should be covered (e.g. docker-based)
+// 5. Add signal handlers in the scripts (e.g. to correctly handle Jenkins abort by timeout situations)
 
 pipeline {
     agent {label "ml-test-node-gpu"}
@@ -15,11 +19,14 @@ pipeline {
     }
 
     environment {
-        ARTEFACT_DIR = "${WORKSPACE}/artefacts"
-        NFS_WORKSPACE = "${NFS_WORKSPACE_ROOT}/ml-nccl-rdma-sharp-plugins-pr/${BUILD_NUMBER}"
-        NCCL_SRC_DIR = "${WORKSPACE}/nccl"
-        NCCL_DIR = "${NFS_WORKSPACE}/nccl"
-        NCCL_TESTS_DIR = "${NFS_WORKSPACE}/nccl-tests"
+        ARTEFACT_DIR    = "${WORKSPACE}/artefacts"
+        // Note: ${NFS_WORKSPACE_ROOT} is cleaned up daily (5 day old files are removed)
+        NFS_WORKSPACE   = "${NFS_WORKSPACE_ROOT}/ml-nccl-rdma-sharp-plugins-pr/${BUILD_NUMBER}"
+        NCCL_SRC_DIR    = "${WORKSPACE}/nccl"
+        NCCL_GIT_URL    = "git@gitlab.com:Mellanox/nccl-sharp.git"
+        NCCL_GIT_BRANCH = "master"
+        NCCL_DIR        = "${NFS_WORKSPACE}/nccl"
+        NCCL_TESTS_DIR  = "${NFS_WORKSPACE}/nccl-tests"
     }
 
     stages {
@@ -32,10 +39,9 @@ pipeline {
         }
         stage('Checkout NCCL') {
             steps {
-                sh 'mkdir -p ${NCCL_SRC_DIR}'
                 dir("${NCCL_SRC_DIR}") {
-                    git branch: 'master',
-                    url: 'git@gitlab.com:Mellanox/nccl-sharp.git'
+                    git branch: "${NCCL_GIT_BRANCH}",
+                    url: "${NCCL_GIT_URL}"
                 }
             }
         }
@@ -45,7 +51,6 @@ pipeline {
                 sh 'set -o pipefail; ${WORKSPACE}/.ci/build_nccl.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl.log'
                 sh 'mkdir -p ${NCCL_DIR}'
                 sh 'cp -R ${NCCL_SRC_DIR}/build/* ${NCCL_DIR}'
-                sh 'find ${NCCL_DIR} -type f'
             }
         }
         stage('Build nccl-rdma-sharp-plugins') {
@@ -56,7 +61,6 @@ pipeline {
         }
         stage('Checkout NCCL tests') {
             steps {
-                sh 'mkdir -p ${NCCL_TESTS_DIR}'
                 dir("${NCCL_TESTS_DIR}") {
                     git branch: 'master',
                     url: 'https://github.com/NVIDIA/nccl-tests.git'
