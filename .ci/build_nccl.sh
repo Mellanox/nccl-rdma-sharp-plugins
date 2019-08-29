@@ -25,21 +25,6 @@ fi
 
 if [ "${ENABLE_PACKAGING}" -eq 1 ]
 then
-    # Packaging
-    #make pkg.debian.build
-    #if [ $? -ne 0 ]
-    #then
-    #   echo "ERROR: 'make pkg.debian.build' failed"
-    #    exit 1
-    #fi
-
-    #make pkg.redhat.build
-    #if [ $? -ne 0 ]
-    #then
-    #   echo "ERROR: 'make pkg.redhat.build' failed"
-    #    exit 1
-    #fi
-
     make pkg.txz.build
     if [ $? -ne 0 ]
     then
