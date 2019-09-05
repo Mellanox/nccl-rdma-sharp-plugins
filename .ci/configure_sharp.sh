@@ -16,6 +16,20 @@ then
     exit 1
 fi
 
+if [ -z "${SHARP_DIR}" ]
+then
+    echo "ERROR: SHARP_DIR is not defined"
+    echo "FAIL"
+    exit 1
+fi
+
+if [ -z "${NCCL_DIR}" ]
+then
+    echo "ERROR: NCCL_DIR is not defined"
+    echo "FAIL"
+    exit 1
+fi
+
 CONFIGURE_SHARP_TMP_DIR="${NFS_WORKSPACE}/configure_sharp_$$"
 mkdir -p ${CONFIGURE_SHARP_TMP_DIR}
 
@@ -114,7 +128,7 @@ verify_sharp() {
     echo "INFO: verify_sharp..."
 
     export PATH="${SHARP_DIR}/bin:$PATH"
-    export LD_LIBRARY_PATH="${SHARP_DIR}/lib:${LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH="${SHARP_DIR}/lib:${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
 
     cp ${SHARP_DIR}/share/sharp/examples/mpi/coll/* ${CONFIGURE_SHARP_TMP_DIR}
     cd ${CONFIGURE_SHARP_TMP_DIR}
