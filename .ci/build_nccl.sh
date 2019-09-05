@@ -1,8 +1,6 @@
 #!/bin/bash -leE
 
 SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
-echo "DEBUG: SCRIPT_DIR = ${SCRIPT_DIR}"
-
 . ${SCRIPT_DIR}/settings.sh
 
 if [ -z "${ENABLE_PACKAGING}" ]

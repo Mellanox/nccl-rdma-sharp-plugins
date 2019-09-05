@@ -1,8 +1,6 @@
 #!/bin/bash -leE
 
 SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
-echo "DEBUG: SCRIPT_DIR = ${SCRIPT_DIR}"
-
 . ${SCRIPT_DIR}/settings.sh
 
 cd ${WORKSPACE}
@@ -34,7 +32,7 @@ then
     exit 1
 fi
 
-echo "DEBUG: ${WORKSPACE}/_install:"
+echo "INFO: ${WORKSPACE}/_install:"
 find ${WORKSPACE}/_install -type f
 
 echo "PASS"

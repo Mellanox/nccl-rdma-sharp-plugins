@@ -7,26 +7,25 @@ then
     set -x
 fi
 
-module load dev/cuda10.0
+CUDA_VERSION="${CUDA_VERSION:-10.0}"
+echo "INFO: CUDA_VERSION = ${CUDA_VERSION}"
+
+module load dev/cuda${CUDA_VERSION}
 module load hpcx-gcc
+module load ml/ci-tools
 
 TOP_DIR="$(git rev-parse --show-toplevel)"
-echo "DEBUG: TOP_DIR = ${TOP_DIR}"
+echo "INFO: TOP_DIR = ${TOP_DIR}"
 
-echo "DEBUG: CUDA_HOME = ${CUDA_HOME}"
-echo "DEBUG: HPCX_SHARP_DIR = ${HPCX_SHARP_DIR}"
-echo "DEBUG: HPCX_DIR = ${HPCX_DIR}"
-echo "DEBUG: WORKSPACE = ${WORKSPACE}"
+echo "INFO: CUDA_HOME = ${CUDA_HOME}"
+echo "INFO: HPCX_SHARP_DIR = ${HPCX_SHARP_DIR}"
+echo "INFO: HPCX_DIR = ${HPCX_DIR}"
+echo "INFO: WORKSPACE = ${WORKSPACE}"
 
 HOSTNAME=`hostname -s`
-echo "DEBUG: HOSTNAME = $HOSTNAME"
+echo "INFO: HOSTNAME = $HOSTNAME"
 
-if [ -z "${WORKSPACE}" ]
-then
-    echo "WARNING: WORKSPACE is empty"
-    WORKSPACE="${TOP_DIR}"
-    echo "DEBUG: WORKSPACE = ${WORKSPACE}"
-fi
+WORKSPACE="${WORKSPACE:-${TOP_DIR}}"
 
 CI_DIR="${WORKSPACE}/.ci"
 NCCL_PLUGIN_DIR="${WORKSPACE}/_install"
@@ -43,7 +42,7 @@ then
     fi
 fi
 
-echo "DEBUG: SHARP_DIR = ${SHARP_DIR}"
+echo "INFO: SHARP_DIR = ${SHARP_DIR}"
 
 if [ ! -d "${HPCX_DIR}" ]
 then

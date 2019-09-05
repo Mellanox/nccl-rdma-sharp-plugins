@@ -4,10 +4,9 @@
 
 // TODO:
 // 1. Calculate taskset/affinity for the scripts based on total number of jenkins executors
-// 2. Enable SHARP test scenarios (including SHARP configuration stage)
-// 3. NCCL/CUDA/SHARP dependencies should be parameterized
-// 4. HPC-X OS/MOFED support matrix should be covered (e.g. docker-based)
-// 5. Add signal handlers in the scripts (e.g. to correctly handle Jenkins abort by timeout situations)
+// 2. NCCL/CUDA/SHARP dependencies should be parameterized
+// 3. HPC-X OS/MOFED support matrix should be covered (e.g. docker-based)
+// 4. Add signal handlers in the scripts (e.g. to correctly handle Jenkins abort by timeout situations)
 
 pipeline {
     agent {label "ml-test-node-gpu"}
@@ -56,7 +55,13 @@ pipeline {
         stage('Build nccl-rdma-sharp-plugins') {
             steps {
                 echo 'Building nccl-rdma-sharp-plugins...'
-                sh 'set -o pipefail; ${WORKSPACE}/.ci/build.sh 2>&1 | tee ${ARTEFACT_DIR}/build.log'
+                sh 'set -o pipefail; ${WORKSPACE}/.ci/build_nccl_rdma_sharp_plugins.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl_rdma_sharp_plugins.log'
+            }
+        }
+        stage('Configure SHARP: startup') {
+            steps {
+                echo 'Configure SHARP: startup...'
+                sh 'set -o pipefail; ${WORKSPACE}/.ci/configure_sharp.sh 2>&1 | tee ${ARTEFACT_DIR}/configure_sharp_startup.log'
             }
         }
         stage('Checkout NCCL tests') {
@@ -67,10 +72,16 @@ pipeline {
                 }
             }
         }
-        stage('Test') {
+        stage('Test nccl-rdma-sharp-plugins') {
             steps {
                 echo 'Testing nccl-rdma-sharp-plugins...'
                 sh 'set -o pipefail; ${WORKSPACE}/.ci/run_nccl_test.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
+            }
+        }
+        stage('Configure SHARP: stop') {
+            steps {
+                echo 'Configure SHARP: stop...'
+                sh 'set -o pipefail; ${WORKSPACE}/.ci/configure_sharp.sh stop 2>&1 | tee ${ARTEFACT_DIR}/configure_sharp_stop.log'
             }
         }
     }
