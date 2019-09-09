@@ -30,20 +30,6 @@ WORKSPACE="${WORKSPACE:-${TOP_DIR}}"
 CI_DIR="${WORKSPACE}/.ci"
 NCCL_PLUGIN_DIR="${WORKSPACE}/_install"
 
-if [ -z "${SHARP_DIR}" ]
-then
-    if [ -z "${HPCX_SHARP_DIR}" ]
-    then
-        echo "ERROR: SHARP_DIR and HPCX_SHARP_DIR not set"
-        echo "FAIL"
-        exit 1
-    else
-        SHARP_DIR="${HPCX_SHARP_DIR}"
-    fi
-fi
-
-echo "INFO: SHARP_DIR = ${SHARP_DIR}"
-
 if [ ! -d "${HPCX_DIR}" ]
 then
     echo "ERROR: ${HPCX_DIR} does not exist or not accessible"

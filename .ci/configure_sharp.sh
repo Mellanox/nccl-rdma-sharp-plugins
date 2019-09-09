@@ -16,9 +16,9 @@ then
     exit 1
 fi
 
-if [ -z "${SHARP_DIR}" ]
+if [ -z "${HPCX_SHARP_DIR}" ]
 then
-    echo "ERROR: SHARP_DIR is not defined"
+    echo "ERROR: HPCX_SHARP_DIR is not defined"
     echo "FAIL"
     exit 1
 fi
@@ -127,12 +127,11 @@ check_opensm_conf() {
 verify_sharp() {
     echo "INFO: verify_sharp..."
 
-    export PATH="${SHARP_DIR}/bin:$PATH"
-    export LD_LIBRARY_PATH="${SHARP_DIR}/lib:${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
 
-    cp ${SHARP_DIR}/share/sharp/examples/mpi/coll/* ${CONFIGURE_SHARP_TMP_DIR}
+    cp ${HPCX_SHARP_DIR}/share/sharp/examples/mpi/coll/* ${CONFIGURE_SHARP_TMP_DIR}
     cd ${CONFIGURE_SHARP_TMP_DIR}
-    make CUDA=1 CUDA_HOME=${CUDA_HOME} SHARP_HOME="${SHARP_DIR}"
+    make CUDA=1 CUDA_HOME=${CUDA_HOME} SHARP_HOME="${HPCX_SHARP_DIR}"
     if [ $? -ne 0 ]
     then
         echo "ERROR: verify_sharp make failed"
@@ -143,7 +142,7 @@ verify_sharp() {
     ITERS=100
     SKIP=20
 
-    # Test 1 (from ${SHARP_DIR}/share/sharp/examples/mpi/coll/README):
+    # Test 1 (from ${HPCX_SHARP_DIR}/share/sharp/examples/mpi/coll/README):
     # Run allreduce barrier perf test on 2 hosts using port mlx5_0
     echo "Test 1..."
     mpirun \
@@ -167,7 +166,7 @@ verify_sharp() {
     fi
     echo "Test 1... DONE"
 
-    # Test 2 (from ${SHARP_DIR}/share/sharp/examples/mpi/coll/README):
+    # Test 2 (from ${HPCX_SHARP_DIR}/share/sharp/examples/mpi/coll/README):
     # Run allreduce perf test on 2 hosts using port mlx5_0 with CUDA buffers
     echo "Test 2..."
     mpirun \
@@ -192,7 +191,7 @@ verify_sharp() {
     fi
     echo "Test 2... DONE"
 
-    # Test 3 (from ${SHARP_DIR}/share/sharp/examples/mpi/coll/README):
+    # Test 3 (from ${HPCX_SHARP_DIR}/share/sharp/examples/mpi/coll/README):
     # Run allreduce perf test on 2 hosts using port mlx5_0 with Streaming aggregation from 4B to 512MB
     echo "Test 3..."
     mpirun \
@@ -235,8 +234,7 @@ verify_sharp() {
         -x HCOLL_ML_DISABLE_REDUCE=1 \
         -x HCOLL_ENABLE_MCAST_ALL=1 \
         -x HCOLL_MCAST_NP=1 \
-        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${SHARP_DIR}/lib \
-        -x LD_PRELOAD=${SHARP_DIR}/lib/libsharp.so:${SHARP_DIR}/lib/libsharp_coll.so \
+        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
         -x HCOLL_ENABLE_SHARP=2 \
         -x SHARP_COLL_LOG_LEVEL=3 \
         -x SHARP_COLL_GROUP_RESOURCE_POLICY=1 \
@@ -279,8 +277,7 @@ verify_sharp() {
         -x HCOLL_ML_DISABLE_REDUCE=1 \
         -x HCOLL_ENABLE_MCAST_ALL=1 \
         -x HCOLL_MCAST_NP=1 \
-        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${SHARP_DIR}/lib \
-        -x LD_PRELOAD=${SHARP_DIR}/lib/libsharp.so:${SHARP_DIR}/lib/libsharp_coll.so \
+        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
         -x HCOLL_ENABLE_SHARP=2 \
         -x SHARP_COLL_LOG_LEVEL=3 \
         -x SHARP_COLL_GROUP_RESOURCE_POLICY=1 \
@@ -316,7 +313,7 @@ then
     check_opensm_conf
 fi
 
-sudo PDSH_RCMD_TYPE=ssh SHARP_INI_FILE=${SHARP_INI_FILE} SHARP_CONF=${SHARP_CONF} ${SHARP_DIR}/sbin/sharp_manager.sh "${SHARP_MANAGER_ACTION}" -l "$HOSTS" -s "${SHARP_AM_NODE}"
+sudo PDSH_RCMD_TYPE=ssh SHARP_INI_FILE=${SHARP_INI_FILE} SHARP_CONF=${SHARP_CONF} ${HPCX_SHARP_DIR}/sbin/sharp_manager.sh "${SHARP_MANAGER_ACTION}" -l "$HOSTS" -s "${SHARP_AM_NODE}"
 if [ $? -ne 0 ]
 then
     echo "ERROR: sharp_manager.sh failed, check the log file"
