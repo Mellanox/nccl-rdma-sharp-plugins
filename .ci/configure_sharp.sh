@@ -217,8 +217,86 @@ verify_sharp() {
     fi
     echo "Test 3... DONE"
 
-    # Test 4: Without SAT
+    # Test 4:
+    # Run iallreduce perf test on 2 hosts using port mlx5_0
     echo "Test 4..."
+    mpirun \
+        -np 2 \
+        -H $HOSTS \
+        --map-by node \
+        -x ENABLE_SHARP_COLL=1 \
+        -x SHARP_COLL_LOG_LEVEL=3 \
+        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+        ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
+            -d mlx5_0:1 \
+            --iters $ITERS \
+            --skip $SKIP \
+            --mode perf \
+            --collectives iallreduce \
+            -N 128
+    if [ $? -ne 0 ]
+    then
+        echo "ERROR: verify_sharp Test 4 failed"
+        echo "FAIL"
+        exit 1
+    fi
+    echo "Test 4... DONE"
+
+    # Test 5:
+    # Run iallreduce perf test on 2 hosts using port mlx5_0 with CUDA buffers
+    echo "Test 5..."
+    mpirun \
+        -np 2 \
+        -H $HOSTS \
+        --map-by node \
+        -x ENABLE_SHARP_COLL=1 \
+        -x SHARP_COLL_LOG_LEVEL=3 \
+        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+        ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
+            -d mlx5_0:1 \
+            --iters $ITERS \
+            --skip $SKIP \
+            --mode perf \
+            --collectives iallreduce \
+            -N 128 \
+            -M cuda
+    if [ $? -ne 0 ]
+    then
+        echo "ERROR: verify_sharp Test 5 failed"
+        echo "FAIL"
+        exit 1
+    fi
+    echo "Test 5... DONE"
+
+    # Test 6:
+    # Run iallreduce perf test on 2 hosts using port mlx5_0 with Streaming aggregation from 4B to 512MB
+    echo "Test 6..."
+    mpirun \
+        -np 2 \
+        -H $HOSTS \
+        --map-by node \
+        -x ENABLE_SHARP_COLL=1 \
+        -x SHARP_COLL_LOG_LEVEL=3 \
+        -x SHARP_COLL_ENABLE_SAT=1 \
+        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+        ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
+            -d mlx5_0:1 \
+            --iters $ITERS \
+            --skip $SKIP \
+            --mode perf \
+            --collectives iallreduce \
+            -N 128 \
+            -s 4:131072
+    if [ $? -ne 0 ]
+    then
+        echo "ERROR: verify_sharp Test 6 failed"
+        echo "FAIL"
+        exit 1
+    fi
+    echo "Test 6... DONE"
+
+    # Test 7: Without SAT
+    echo "Test 7..."
     $OMPI_HOME/bin/mpirun \
         --bind-to core \
         --map-by node \
@@ -254,14 +332,14 @@ verify_sharp() {
                     -m 4096:4096
     if [ $? -ne 0 ]
     then
-        echo "ERROR: Test 4 (without SAT) failed, check the log file"
+        echo "ERROR: Test 7 (without SAT) failed, check the log file"
         echo "FAIL"
         exit 1
     fi
-    echo "Test 4... DONE"
+    echo "Test 7... DONE"
 
-    # Test 5: With SAT
-    echo "Test 5..."
+    # Test 8: With SAT
+    echo "Test 8..."
     $OMPI_HOME/bin/mpirun \
         --bind-to core \
         --map-by node \
@@ -298,11 +376,11 @@ verify_sharp() {
                 -m 4096:4096
     if [ $? -ne 0 ]
     then
-        echo "ERROR: Test 5 (with SAT) failed, check the log file"
+        echo "ERROR: Test 8 (with SAT) failed, check the log file"
         echo "FAIL"
         exit 1
     fi
-    echo "Test 5... DONE"
+    echo "Test 8... DONE"
 
     echo "INFO: verify_sharp... DONE"
 }
