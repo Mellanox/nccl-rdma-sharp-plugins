@@ -71,7 +71,6 @@ echo_hash_line() {
 
 echo "CUDA_HOME: ${CUDA_HOME}"
 echo "NCCL_DIR: ${NCCL_DIR}"
-echo "SHARP_DIR: ${SHARP_DIR}"
 echo "NCCL_PLUGIN_DIR: ${NCCL_PLUGIN_DIR}"
 echo "MPI_HOME: ${MPI_HOME}"
 
@@ -88,7 +87,7 @@ make -j clean
 
 make -j CUDA_HOME="${CUDA_HOME}" NCCL_HOME="${NCCL_DIR}" MPI=1 MPI_HOME="${MPI_HOME}"
 
-export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_PLUGIN_DIR}/lib:${SHARP_DIR}/lib:${LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_PLUGIN_DIR}/lib:${LD_LIBRARY_PATH}"
 
 # USAGE: all_reduce_perf
         # [-t,--nthreads <num threads>]

@@ -3,6 +3,9 @@
 SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
 . ${SCRIPT_DIR}/settings.sh
 
+NCCL_RDMA_SHARP_PLUGINS_DIR="${NCCL_RDMA_SHARP_PLUGINS_DIR:-${WORKSPACE}/_install}"
+echo "INFO: NCCL_RDMA_SHARP_PLUGINS_DIR = ${NCCL_RDMA_SHARP_PLUGINS_DIR}"
+
 cd ${WORKSPACE}
 
 ${WORKSPACE}/autogen.sh
@@ -14,7 +17,7 @@ then
 fi
 
 ${WORKSPACE}/configure \
-    --prefix=${WORKSPACE}/_install \
+    --prefix=${NCCL_RDMA_SHARP_PLUGINS_DIR} \
     --with-cuda=${CUDA_HOME} \
     --with-sharp=${HPCX_SHARP_DIR}
 if [ $? -ne 0 ]
@@ -32,7 +35,7 @@ then
     exit 1
 fi
 
-echo "INFO: ${WORKSPACE}/_install:"
-find ${WORKSPACE}/_install -type f
+echo "INFO: ${NCCL_RDMA_SHARP_PLUGINS_DIR}:"
+find ${NCCL_RDMA_SHARP_PLUGINS_DIR} -type f
 
 echo "PASS"
