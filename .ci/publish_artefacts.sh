@@ -1,13 +1,9 @@
 #!/bin/bash -leE
 
-if [ -n "$DEBUG" ]
-then
-    set -x
-fi
+SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
+. ${SCRIPT_DIR}/settings.sh
 
 echo 'Publish artefacts...'
-
-module load ml/ci-tools
 
 export UPSTREAM_JOB_NAME=${JOB_NAME}
 export UPSTREAM_BUILD_NUMBER=${BUILD_NUMBER}
