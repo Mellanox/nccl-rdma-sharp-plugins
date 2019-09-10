@@ -91,3 +91,6 @@ config.cache
 *.app
 
 .idea
+
+*.orig
+*.bak
