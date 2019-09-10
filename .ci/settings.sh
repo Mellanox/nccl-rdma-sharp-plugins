@@ -31,7 +31,6 @@ echo "INFO: HOSTNAME = $HOSTNAME"
 WORKSPACE="${WORKSPACE:-${TOP_DIR}}"
 
 CI_DIR="${WORKSPACE}/.ci"
-NCCL_PLUGIN_DIR="${WORKSPACE}/_install"
 
 if [ ! -d "${HPCX_DIR}" ]
 then

@@ -12,6 +12,13 @@ then
     exit 1
 fi
 
+if [ -z "${NCCL_RDMA_SHARP_PLUGINS_DIR}" ]
+then
+    echo "ERROR: NCCL_RDMA_SHARP_PLUGINS_DIR is not defined"
+    echo "FAIL"
+    exit 1
+fi
+
 if [ -z "${NCCL_TESTS_DIR}" ]
 then
     echo "ERROR: NCCL_TESTS_DIR is not defined"
@@ -71,7 +78,7 @@ echo_hash_line() {
 
 echo "CUDA_HOME: ${CUDA_HOME}"
 echo "NCCL_DIR: ${NCCL_DIR}"
-echo "NCCL_PLUGIN_DIR: ${NCCL_PLUGIN_DIR}"
+echo "NCCL_RDMA_SHARP_PLUGINS_DIR: ${NCCL_RDMA_SHARP_PLUGINS_DIR}"
 echo "MPI_HOME: ${MPI_HOME}"
 
 if [ ! -f "${HOSTFILE}" ]
@@ -87,7 +94,7 @@ make -j clean
 
 make -j CUDA_HOME="${CUDA_HOME}" NCCL_HOME="${NCCL_DIR}" MPI=1 MPI_HOME="${MPI_HOME}"
 
-export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_PLUGIN_DIR}/lib:${LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_RDMA_SHARP_PLUGINS_DIR}/lib:${LD_LIBRARY_PATH}"
 
 # USAGE: all_reduce_perf
         # [-t,--nthreads <num threads>]
@@ -118,8 +125,6 @@ export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_PLUGIN_DIR}/lib:${LD_LIBRARY_PATH
     echo_hash_line
     echo "# Test 1..."
     echo_hash_line
-
-    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_PLUGIN_DIR}/lib:${SHARP_DIR}/lib:${LD_LIBRARY_PATH}"
 
     MPIRUN_OPTIONS_SPECIFIC="\
     -x NCCL_LL_THRESHOLD=0 \
