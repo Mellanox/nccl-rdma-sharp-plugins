@@ -83,6 +83,10 @@ echo "INFO: SHARP_INI_FILE ${SHARP_INI_FILE} BEGIN"
 cat ${SHARP_INI_FILE}
 echo "INFO: SHARP_INI_FILE ${SHARP_INI_FILE} END"
 
+trim_multiple_spaces() {
+    echo "$1" | sed -s "s|\ \ *| |g"
+}
+
 check_opensm_status() {
     echo "Checking OpenSM status on ${SHARP_AM_NODE}..."
 
@@ -145,19 +149,22 @@ verify_sharp() {
     # Test 1 (from ${HPCX_SHARP_DIR}/share/sharp/examples/mpi/coll/README):
     # Run allreduce barrier perf test on 2 hosts using port mlx5_0
     echo "Test 1..."
-    mpirun \
-        -np 2 \
-        -H $HOSTS \
-        --map-by node \
-        -x ENABLE_SHARP_COLL=1 \
-        -x SHARP_COLL_LOG_LEVEL=3 \
-        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
-        ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
-            -d mlx5_0:1 \
-            --iters $ITERS \
-            --skip $SKIP \
-            --mode perf \
-            --collectives allreduce,barrier
+    CMD="mpirun \
+            -np 2 \
+            -H $HOSTS \
+            --map-by node \
+            -x ENABLE_SHARP_COLL=1 \
+            -x SHARP_COLL_LOG_LEVEL=3 \
+            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
+                -d mlx5_0:1 \
+                --iters $ITERS \
+                --skip $SKIP \
+                --mode perf \
+                --collectives allreduce,barrier"
+    echo "INFO: Test 1 command line:"
+    trim_multiple_spaces "$CMD"
+    $CMD
     if [ $? -ne 0 ]
     then
         echo "ERROR: verify_sharp Test 1 failed"
@@ -169,20 +176,23 @@ verify_sharp() {
     # Test 2 (from ${HPCX_SHARP_DIR}/share/sharp/examples/mpi/coll/README):
     # Run allreduce perf test on 2 hosts using port mlx5_0 with CUDA buffers
     echo "Test 2..."
-    mpirun \
-        -np 2 \
-        -H $HOSTS \
-        --map-by node \
-        -x ENABLE_SHARP_COLL=1 \
-        -x SHARP_COLL_LOG_LEVEL=3 \
-        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
-        ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
-            -d mlx5_0:1 \
-            --iters $ITERS \
-            --skip $SKIP \
-            --mode perf \
-            --collectives allreduce \
-            -M cuda
+    CMD="mpirun \
+            -np 2 \
+            -H $HOSTS \
+            --map-by node \
+            -x ENABLE_SHARP_COLL=1 \
+            -x SHARP_COLL_LOG_LEVEL=3 \
+            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
+                -d mlx5_0:1 \
+                --iters $ITERS \
+                --skip $SKIP \
+                --mode perf \
+                --collectives allreduce \
+                -M cuda"
+    echo "INFO: Test 2 command line:"
+    trim_multiple_spaces "$CMD"
+    $CMD
     if [ $? -ne 0 ]
     then
         echo "ERROR: verify_sharp Test 2 failed"
@@ -194,21 +204,24 @@ verify_sharp() {
     # Test 3 (from ${HPCX_SHARP_DIR}/share/sharp/examples/mpi/coll/README):
     # Run allreduce perf test on 2 hosts using port mlx5_0 with Streaming aggregation from 4B to 512MB
     echo "Test 3..."
-    mpirun \
-        -np 2 \
-        -H $HOSTS \
-        --map-by node \
-        -x ENABLE_SHARP_COLL=1 \
-        -x SHARP_COLL_LOG_LEVEL=3 \
-        -x SHARP_COLL_ENABLE_SAT=1 \
-        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
-        ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
-            -d mlx5_0:1 \
-            --iters $ITERS \
-            --skip $SKIP \
-            --mode perf \
-            --collectives allreduce \
-            -s 4:536870912
+    CMD="mpirun \
+            -np 2 \
+            -H $HOSTS \
+            --map-by node \
+            -x ENABLE_SHARP_COLL=1 \
+            -x SHARP_COLL_LOG_LEVEL=3 \
+            -x SHARP_COLL_ENABLE_SAT=1 \
+            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
+                -d mlx5_0:1 \
+                --iters $ITERS \
+                --skip $SKIP \
+                --mode perf \
+                --collectives allreduce \
+                -s 4:536870912"
+    echo "INFO: Test 3 command line:"
+    trim_multiple_spaces "$CMD"
+    $CMD
     if [ $? -ne 0 ]
     then
         echo "ERROR: verify_sharp Test 3 failed"
@@ -217,92 +230,185 @@ verify_sharp() {
     fi
     echo "Test 3... DONE"
 
-    # Test 4: Without SAT
+    # Test 4:
+    # Run iallreduce perf test on 2 hosts using port mlx5_0
     echo "Test 4..."
-    $OMPI_HOME/bin/mpirun \
-        --bind-to core \
-        --map-by node \
-        -host $HOSTS \
-        -np 2 \
-        -mca btl_openib_warn_default_gid_prefix 0 \
-        -mca rmaps_dist_device mlx5_0:1 \
-        -mca rmaps_base_mapping_policy dist:span \
-        -x MXM_RDMA_PORTS=mlx5_0:1 \
-        -x HCOLL_MAIN_IB=mlx5_0:1 \
-        -x MXM_ASYNC_INTERVAL=1800s \
-        -x MXM_LOG_LEVEL=ERROR \
-        -x HCOLL_ML_DISABLE_REDUCE=1 \
-        -x HCOLL_ENABLE_MCAST_ALL=1 \
-        -x HCOLL_MCAST_NP=1 \
-        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
-        -x HCOLL_ENABLE_SHARP=2 \
-        -x SHARP_COLL_LOG_LEVEL=3 \
-        -x SHARP_COLL_GROUP_RESOURCE_POLICY=1 \
-        -x SHARP_COLL_MAX_PAYLOAD_SIZE=256 \
-        -x HCOLL_SHARP_UPROGRESS_NUM_POLLS=999 \
-        -x HCOLL_BCOL_P2P_ALLREDUCE_SHARP_MAX=4096 \
-        -x SHARP_COLL_PIPELINE_DEPTH=32 \
-        -x SHARP_COLL_JOB_QUOTA_OSTS=32 \
-        -x SHARP_COLL_JOB_QUOTA_MAX_GROUPS=4 \
-        -x SHARP_COLL_JOB_QUOTA_PAYLOAD_PER_OST=256 \
-        taskset -c 1 \
-            numactl --membind=0 \
-                $OMPI_HOME/tests/osu-micro-benchmarks-5.3.2/osu_allreduce \
-                    -i 100 \
-                    -x 100 \
-                    -f \
-                    -m 4096:4096
+    CMD="mpirun \
+            -np 2 \
+            -H $HOSTS \
+            --map-by node \
+            -x ENABLE_SHARP_COLL=1 \
+            -x SHARP_COLL_LOG_LEVEL=3 \
+            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
+                -d mlx5_0:1 \
+                --iters $ITERS \
+                --skip $SKIP \
+                --mode perf \
+                --collectives iallreduce \
+                -N 128"
+    echo "INFO: Test 4 command line:"
+    trim_multiple_spaces "$CMD"
+    $CMD
     if [ $? -ne 0 ]
     then
-        echo "ERROR: Test 4 (without SAT) failed, check the log file"
+        echo "ERROR: verify_sharp Test 4 failed"
         echo "FAIL"
         exit 1
     fi
     echo "Test 4... DONE"
 
-    # Test 5: With SAT
+    # Test 5:
+    # Run iallreduce perf test on 2 hosts using port mlx5_0 with CUDA buffers
     echo "Test 5..."
-    $OMPI_HOME/bin/mpirun \
-        --bind-to core \
-        --map-by node \
-        -host $HOSTS \
-        -np 2 \
-        -mca btl_openib_warn_default_gid_prefix 0 \
-        -mca rmaps_dist_device mlx5_0:1 \
-        -mca rmaps_base_mapping_policy dist:span \
-        -x MXM_RDMA_PORTS=mlx5_0:1 \
-        -x HCOLL_MAIN_IB=mlx5_0:1 \
-        -x MXM_ASYNC_INTERVAL=1800s \
-        -x MXM_LOG_LEVEL=ERROR \
-        -x HCOLL_ML_DISABLE_REDUCE=1 \
-        -x HCOLL_ENABLE_MCAST_ALL=1 \
-        -x HCOLL_MCAST_NP=1 \
-        -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
-        -x HCOLL_ENABLE_SHARP=2 \
-        -x SHARP_COLL_LOG_LEVEL=3 \
-        -x SHARP_COLL_GROUP_RESOURCE_POLICY=1 \
-        -x SHARP_COLL_MAX_PAYLOAD_SIZE=256 \
-        -x HCOLL_SHARP_UPROGRESS_NUM_POLLS=999 \
-        -x HCOLL_BCOL_P2P_ALLREDUCE_SHARP_MAX=4096 \
-        -x SHARP_COLL_PIPELINE_DEPTH=32 \
-        -x SHARP_COLL_JOB_QUOTA_OSTS=32 \
-        -x SHARP_COLL_JOB_QUOTA_MAX_GROUPS=4 \
-        -x SHARP_COLL_JOB_QUOTA_PAYLOAD_PER_OST=256 \
-        -x SHARP_COLL_ENABLE_SAT=1 \
-        taskset -c 1 \
-            numactl --membind=0 \
-                $OMPI_HOME/tests/osu-micro-benchmarks-5.3.2/osu_allreduce \
-                    -i 100 \
-                    -x 100 \
-                    -f \
-                -m 4096:4096
+    CMD="mpirun \
+            -np 2 \
+            -H $HOSTS \
+            --map-by node \
+            -x ENABLE_SHARP_COLL=1 \
+            -x SHARP_COLL_LOG_LEVEL=3 \
+            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
+                -d mlx5_0:1 \
+                --iters $ITERS \
+                --skip $SKIP \
+                --mode perf \
+                --collectives iallreduce \
+                -N 128 \
+                -M cuda"
+    echo "INFO: Test 5 command line:"
+    trim_multiple_spaces "$CMD"
+    $CMD
     if [ $? -ne 0 ]
     then
-        echo "ERROR: Test 5 (with SAT) failed, check the log file"
+        echo "ERROR: verify_sharp Test 5 failed"
         echo "FAIL"
         exit 1
     fi
     echo "Test 5... DONE"
+
+    # Test 6:
+    # Run iallreduce perf test on 2 hosts using port mlx5_0 with Streaming aggregation from 4B to 512MB
+    echo "Test 6..."
+    CMD="mpirun \
+            -np 2 \
+            -H $HOSTS \
+            --map-by node \
+            -x ENABLE_SHARP_COLL=1 \
+            -x SHARP_COLL_LOG_LEVEL=3 \
+            -x SHARP_COLL_ENABLE_SAT=1 \
+            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
+                -d mlx5_0:1 \
+                --iters $ITERS \
+                --skip $SKIP \
+                --mode perf \
+                --collectives iallreduce \
+                -N 128 \
+                -s 4:131072"
+    echo "INFO: Test 6 command line:"
+    trim_multiple_spaces "$CMD"
+    $CMD
+    if [ $? -ne 0 ]
+    then
+        echo "ERROR: verify_sharp Test 6 failed"
+        echo "FAIL"
+        exit 1
+    fi
+    echo "Test 6... DONE"
+
+    # Test 7: Without SAT
+    echo "Test 7..."
+    CMD="$OMPI_HOME/bin/mpirun \
+            --bind-to core \
+            --map-by node \
+            -host $HOSTS \
+            -np 2 \
+            -mca btl_openib_warn_default_gid_prefix 0 \
+            -mca rmaps_dist_device mlx5_0:1 \
+            -mca rmaps_base_mapping_policy dist:span \
+            -x MXM_RDMA_PORTS=mlx5_0:1 \
+            -x HCOLL_MAIN_IB=mlx5_0:1 \
+            -x MXM_ASYNC_INTERVAL=1800s \
+            -x MXM_LOG_LEVEL=ERROR \
+            -x HCOLL_ML_DISABLE_REDUCE=1 \
+            -x HCOLL_ENABLE_MCAST_ALL=1 \
+            -x HCOLL_MCAST_NP=1 \
+            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            -x HCOLL_ENABLE_SHARP=2 \
+            -x SHARP_COLL_LOG_LEVEL=3 \
+            -x SHARP_COLL_GROUP_RESOURCE_POLICY=1 \
+            -x SHARP_COLL_MAX_PAYLOAD_SIZE=256 \
+            -x HCOLL_SHARP_UPROGRESS_NUM_POLLS=999 \
+            -x HCOLL_BCOL_P2P_ALLREDUCE_SHARP_MAX=4096 \
+            -x SHARP_COLL_PIPELINE_DEPTH=32 \
+            -x SHARP_COLL_JOB_QUOTA_OSTS=32 \
+            -x SHARP_COLL_JOB_QUOTA_MAX_GROUPS=4 \
+            -x SHARP_COLL_JOB_QUOTA_PAYLOAD_PER_OST=256 \
+            taskset -c 1 \
+                numactl --membind=0 \
+                    $OMPI_HOME/tests/osu-micro-benchmarks-5.3.2/osu_allreduce \
+                        -i 100 \
+                        -x 100 \
+                        -f \
+                        -m 4096:4096"
+    echo "INFO: Test 7 command line:"
+    trim_multiple_spaces "$CMD"
+    $CMD
+    if [ $? -ne 0 ]
+    then
+        echo "ERROR: Test 7 (without SAT) failed, check the log file"
+        echo "FAIL"
+        exit 1
+    fi
+    echo "Test 7... DONE"
+
+    # Test 8: With SAT
+    echo "Test 8..."
+    CMD="$OMPI_HOME/bin/mpirun \
+            --bind-to core \
+            --map-by node \
+            -host $HOSTS \
+            -np 2 \
+            -mca btl_openib_warn_default_gid_prefix 0 \
+            -mca rmaps_dist_device mlx5_0:1 \
+            -mca rmaps_base_mapping_policy dist:span \
+            -x MXM_RDMA_PORTS=mlx5_0:1 \
+            -x HCOLL_MAIN_IB=mlx5_0:1 \
+            -x MXM_ASYNC_INTERVAL=1800s \
+            -x MXM_LOG_LEVEL=ERROR \
+            -x HCOLL_ML_DISABLE_REDUCE=1 \
+            -x HCOLL_ENABLE_MCAST_ALL=1 \
+            -x HCOLL_MCAST_NP=1 \
+            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            -x HCOLL_ENABLE_SHARP=2 \
+            -x SHARP_COLL_LOG_LEVEL=3 \
+            -x SHARP_COLL_GROUP_RESOURCE_POLICY=1 \
+            -x SHARP_COLL_MAX_PAYLOAD_SIZE=256 \
+            -x HCOLL_SHARP_UPROGRESS_NUM_POLLS=999 \
+            -x HCOLL_BCOL_P2P_ALLREDUCE_SHARP_MAX=4096 \
+            -x SHARP_COLL_PIPELINE_DEPTH=32 \
+            -x SHARP_COLL_JOB_QUOTA_OSTS=32 \
+            -x SHARP_COLL_JOB_QUOTA_MAX_GROUPS=4 \
+            -x SHARP_COLL_JOB_QUOTA_PAYLOAD_PER_OST=256 \
+            -x SHARP_COLL_ENABLE_SAT=1 \
+            taskset -c 1 \
+                numactl --membind=0 \
+                    $OMPI_HOME/tests/osu-micro-benchmarks-5.3.2/osu_allreduce \
+                        -i 100 \
+                        -x 100 \
+                        -f \
+                    -m 4096:4096"
+    echo "INFO: Test 8 command line:"
+    trim_multiple_spaces "$CMD"
+    $CMD
+    if [ $? -ne 0 ]
+    then
+        echo "ERROR: Test 8 (with SAT) failed, check the log file"
+        echo "FAIL"
+        exit 1
+    fi
+    echo "Test 8... DONE"
 
     echo "INFO: verify_sharp... DONE"
 }

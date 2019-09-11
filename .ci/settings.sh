@@ -14,6 +14,9 @@ module load dev/cuda${CUDA_VERSION}
 module load hpcx-gcc
 module load ml/ci-tools
 
+# It is needed to disable nccl_rdma_sharp_plugin libs from HPC-X
+export LD_LIBRARY_PATH=`echo $LD_LIBRARY_PATH | sed -e 's|nccl_rdma_sharp_plugin|nccl_rdma_sharp_pluginX|g'`
+
 TOP_DIR="$(git rev-parse --show-toplevel)"
 echo "INFO: TOP_DIR = ${TOP_DIR}"
 
@@ -28,7 +31,6 @@ echo "INFO: HOSTNAME = $HOSTNAME"
 WORKSPACE="${WORKSPACE:-${TOP_DIR}}"
 
 CI_DIR="${WORKSPACE}/.ci"
-NCCL_PLUGIN_DIR="${WORKSPACE}/_install"
 
 if [ ! -d "${HPCX_DIR}" ]
 then

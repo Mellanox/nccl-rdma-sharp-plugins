@@ -8,6 +8,13 @@ then
     ENABLE_PACKAGING=0
 fi
 
+if [ -z "${NCCL_SRC_DIR}" ]
+then
+    echo "ERROR: NCCL_SRC_DIR is not defined"
+    echo "FAIL"
+    exit 1
+fi
+
 # Clean
 cd ${NCCL_SRC_DIR}
 make -j clean
