@@ -986,7 +986,6 @@ static __inline__ int typeSize(ncclDataType_t type) {
 static __inline__ enum sharp_reduce_op opConvert(ncclRedOp_t op) {
   switch (op) {
     case ncclSum: return SHARP_OP_SUM;
-    case ncclProd: return SHARP_OP_PROD;
     case ncclMax: return SHARP_OP_MAX;
     case ncclMin: return SHARP_OP_MIN;
     default:
