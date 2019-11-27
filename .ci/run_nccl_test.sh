@@ -127,8 +127,9 @@ export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_RDMA_SHARP_PLUGINS_DIR}/lib:${LD_
     echo_hash_line
 
     MPIRUN_OPTIONS_SPECIFIC="\
-    -x NCCL_LL_THRESHOLD=0 \
-    -x NCCL_TREE_THRESHOLD=1000000000 \
+    -x NCCL_PROTO=Simple \
+    -x NCCL_ALGO=CollNet \
+    -x NCCL_COLLNET_ENABLE=1 \
     -x SHARP_COLL_LOG_LEVEL=3 \
     -x ENABLE_SHARP_COLL=1 \
     -x SHARP_COLL_OSTS_PER_GROUP=64 \
@@ -160,8 +161,9 @@ fi
     echo_hash_line
 
     MPIRUN_OPTIONS_SPECIFIC="\
-    -x NCCL_LL_THRESHOLD=1000000000 \
-    -x NCCL_TREE_THRESHOLD=1000000000 \
+    -x NCCL_PROTO=LL \
+    -x NCCL_ALGO=CollNet \
+    -x NCCL_COLLNET_ENABLE=1 \
     -x SHARP_COLL_LOG_LEVEL=3 \
     -x ENABLE_SHARP_COLL=1 \
     -x SHARP_COLL_OSTS_PER_GROUP=64 \
@@ -194,8 +196,8 @@ fi
     echo_hash_line
 
     MPIRUN_OPTIONS_SPECIFIC="\
-    -x NCCL_LL_THRESHOLD=1000000000 \
-    -x NCCL_TREE_THRESHOLD=1000000000 \
+    -x NCCL_PROTO=LL \
+    -x NCCL_ALGO=Tree \
     "
     mpirun \
         ${MPIRUN_OPTIONS_COMMON} \
@@ -219,8 +221,8 @@ fi
     echo_hash_line
     
     MPIRUN_OPTIONS_SPECIFIC="\
-    -x NCCL_LL_THRESHOLD=0 \
-    -x NCCL_TREE_THRESHOLD=1000000000 \
+    -x NCCL_PROTO=Simple \
+    -x NCCL_ALGO=Tree \
     "
     mpirun \
         ${MPIRUN_OPTIONS_COMMON} \
@@ -244,7 +246,7 @@ fi
     echo_hash_line
     
     MPIRUN_OPTIONS_SPECIFIC="\
-    -x NCCL_TREE_THRESHOLD=1000000000 \
+    -x NCCL_ALGO=Tree \
     "
     mpirun \
         ${MPIRUN_OPTIONS_COMMON} \
@@ -268,8 +270,8 @@ fi
     echo_hash_line
     
     MPIRUN_OPTIONS_SPECIFIC="\
-    -x NCCL_LL_THRESHOLD=1000000000 \
-    -x NCCL_TREE_THRESHOLD=0 \
+    -x NCCL_PROTO=LL \
+    -x NCCL_ALGO=Ring \
     "
     mpirun \
         ${MPIRUN_OPTIONS_COMMON} \
@@ -293,8 +295,8 @@ fi
     echo_hash_line
     
     MPIRUN_OPTIONS_SPECIFIC="\
-    -x NCCL_LL_THRESHOLD=0 \
-    -x NCCL_TREE_THRESHOLD=0 \
+    -x NCCL_PROTO=Simple \
+    -x NCCL_ALGO=Ring \
     "
     mpirun \
         ${MPIRUN_OPTIONS_COMMON} \
@@ -318,7 +320,7 @@ fi
     echo_hash_line
     
     MPIRUN_OPTIONS_SPECIFIC="\
-    -x NCCL_TREE_THRESHOLD=0 \
+    -x NCCL_ALGO=Ring \
     "
     mpirun \
         ${MPIRUN_OPTIONS_COMMON} \
