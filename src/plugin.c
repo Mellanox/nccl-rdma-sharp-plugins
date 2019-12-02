@@ -962,9 +962,7 @@ static __inline__ enum sharp_datatype typeConvert(ncclDataType_t type) {
     case ncclInt64: return SHARP_DTYPE_LONG;
     case ncclUint64: return SHARP_DTYPE_UNSIGNED_LONG;
     case ncclFloat64: return SHARP_DTYPE_DOUBLE;
-    default:
-      WARN("SHARP: unsupported data type\n");
-      return -1;
+    default: return SHARP_DTYPE_NULL;
   }
 }
 
@@ -988,9 +986,7 @@ static __inline__ enum sharp_reduce_op opConvert(ncclRedOp_t op) {
     case ncclSum: return SHARP_OP_SUM;
     case ncclMax: return SHARP_OP_MAX;
     case ncclMin: return SHARP_OP_MIN;
-    default:
-      WARN("SHARP: unsupported reduce operation\n");
-      return -1;
+    default: return SHARP_OP_NULL;
   }
 }
 
@@ -1075,7 +1071,7 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
 }
 
 ncclResult_t ncclSharpReduceSupport(ncclDataType_t dataType, ncclRedOp_t redOp, int* supported) {
-  *supported = ((typeConvert(dataType) >= 0) && (opConvert(redOp) >= 0));
+  *supported = ((typeConvert(dataType) != SHARP_DTYPE_NULL) && (opConvert(redOp) != SHARP_OP_NULL));
   return ncclSuccess;
 }
 
@@ -1133,7 +1129,17 @@ ncclResult_t ncclSharpIallreduce(void* collComm, void* sendData, void* recvData,
   struct ncclSharpCollComm* cComm = (struct ncclSharpCollComm*)collComm;
 
   enum sharp_datatype sharp_type = typeConvert(dataType);
+  if (sharp_type == SHARP_DTYPE_NULL) {
+    WARN("SHARP: unsupported data type\n");
+    return ncclInternalError;
+  }
+
   enum sharp_reduce_op op_type = opConvert(redOp);
+  if (op_type == SHARP_OP_NULL) {
+    WARN("SHARP: unsupported reduce operation\n");
+    return ncclInternalError;
+  }
+
   int dt_size = typeSize(dataType);
   struct ncclSharpMemHandle *mr_sbuf = (struct ncclSharpMemHandle*)sendMhandle;
   struct ncclSharpMemHandle *mr_rbuf = (struct ncclSharpMemHandle*)recvMhandle;
@@ -1148,14 +1154,12 @@ ncclResult_t ncclSharpIallreduce(void* collComm, void* sendData, void* recvData,
   reduce_spec.sbuf_desc.buffer.mem_handle = mr_sbuf->mr;
   reduce_spec.sbuf_desc.type = SHARP_DATA_BUFFER;
   reduce_spec.sbuf_desc.mem_type = (mr_sbuf->type == NCCL_PTR_CUDA ? SHARP_MEM_TYPE_CUDA:SHARP_MEM_TYPE_HOST);
-  //printf("Send %p size %d mr %p type %s\n", reduce_spec.sbuf_desc.buffer.ptr, dt_size, reduce_spec.sbuf_desc.buffer.mem_handle, reduce_spec.sbuf_desc.mem_type == SHARP_MEM_TYPE_CUDA ? "CUDA" : "HOST");
 
   reduce_spec.rbuf_desc.buffer.ptr = recvData;
   reduce_spec.rbuf_desc.buffer.length = count * dt_size;
   reduce_spec.rbuf_desc.buffer.mem_handle = mr_rbuf->mr;
   reduce_spec.rbuf_desc.type = SHARP_DATA_BUFFER;
   reduce_spec.rbuf_desc.mem_type = (mr_rbuf->type == NCCL_PTR_CUDA ? SHARP_MEM_TYPE_CUDA:SHARP_MEM_TYPE_HOST);
-  //printf("Recv %p size %d mr %p type %s\n", reduce_spec.rbuf_desc.buffer.ptr, dt_size, reduce_spec.rbuf_desc.buffer.mem_handle, reduce_spec.rbuf_desc.mem_type == SHARP_MEM_TYPE_CUDA ? "CUDA" : "HOST");
 
   reduce_spec.length = count;
   reduce_spec.dtype = sharp_type;
