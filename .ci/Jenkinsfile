@@ -22,8 +22,8 @@ pipeline {
         // Note: ${NFS_WORKSPACE_ROOT} is cleaned up daily (5 day old files are removed)
         NFS_WORKSPACE               = "${NFS_WORKSPACE_ROOT}/ml-nccl-rdma-sharp-plugins-pr/${BUILD_NUMBER}"
         NCCL_SRC_DIR                = "${WORKSPACE}/nccl"
-        NCCL_GIT_URL                = "git@gitlab.com:Mellanox/nccl-sharp.git"
-        NCCL_GIT_BRANCH             = "master"
+        NCCL_GIT_URL                = "https://github.com/NVIDIA/nccl.git"
+        NCCL_GIT_BRANCH             = "collnet"
         NCCL_DIR                    = "${NFS_WORKSPACE}/nccl"
         NCCL_RDMA_SHARP_PLUGINS_DIR = "${NFS_WORKSPACE}/nccl-rdma-sharp-plugins"
         NCCL_TESTS_DIR              = "${NFS_WORKSPACE}/nccl-tests"
