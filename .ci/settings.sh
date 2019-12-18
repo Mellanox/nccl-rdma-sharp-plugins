@@ -31,8 +31,7 @@ HOSTNAME=`hostname -s`
 echo "INFO: HOSTNAME = $HOSTNAME"
 
 WORKSPACE="${WORKSPACE:-${TOP_DIR}}"
-
-CFG_DIR="${TOP_DIR}/jenkins/cfg"
+CFG_DIR="${WORKSPACE}/.ci/cfg"
 HOSTFILE=${CFG_DIR}/$HOSTNAME/hostfile
 
 if [ ! -f "${HOSTFILE}" ]
@@ -41,8 +40,6 @@ then
     echo "FAIL"
     exit 1
 fi
-
-CI_DIR="${WORKSPACE}/.ci"
 
 if [ ! -d "${HPCX_DIR}" ]
 then
