@@ -2,15 +2,17 @@
 
 set -o pipefail
 
-if [ -n "$DEBUG" ]
+echo "INFO: DEBUG = $DEBUG"
+
+if [ "$DEBUG" = "true" ]
 then
     set -x
 fi
 
-CUDA_VERSION="${CUDA_VERSION:-10.1}"
-echo "INFO: CUDA_VERSION = ${CUDA_VERSION}"
+export CUDA_VER="${CUDA_VER:-10.2}"
+echo "INFO: CUDA_VER = ${CUDA_VER}"
 
-module load dev/cuda${CUDA_VERSION}
+module load dev/cuda${CUDA_VER}
 module load hpcx-gcc
 module load ml/ci-tools
 
@@ -29,6 +31,16 @@ HOSTNAME=`hostname -s`
 echo "INFO: HOSTNAME = $HOSTNAME"
 
 WORKSPACE="${WORKSPACE:-${TOP_DIR}}"
+
+CFG_DIR="${TOP_DIR}/jenkins/cfg"
+HOSTFILE=${CFG_DIR}/$HOSTNAME/hostfile
+
+if [ ! -f "${HOSTFILE}" ]
+then
+    echo "ERROR: ${HOSTFILE} doesn't exist or not accessible"
+    echo "FAIL"
+    exit 1
+fi
 
 CI_DIR="${WORKSPACE}/.ci"
 

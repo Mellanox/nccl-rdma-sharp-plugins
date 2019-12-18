@@ -1,6 +1,6 @@
 #!/usr/bin/env groovy
 
-// Verified with Jenkins v2.164.3
+// Verified with Jenkins v2.190.2
 
 // TODO:
 // 1. Calculate taskset/affinity for the scripts based on total number of jenkins executors
@@ -12,7 +12,7 @@ pipeline {
     agent {label "ml-test-node-gpu"}
 
     options {
-        buildDiscarder(logRotator(numToKeepStr:'10'))
+        buildDiscarder(logRotator(numToKeepStr: '10'))
         timeout(time: 15, unit: 'MINUTES')
         disableConcurrentBuilds()
     }
@@ -21,10 +21,6 @@ pipeline {
         ARTEFACT_DIR                = "${WORKSPACE}/artefacts"
         // Note: ${NFS_WORKSPACE_ROOT} is cleaned up daily (5 day old files are removed)
         NFS_WORKSPACE               = "${NFS_WORKSPACE_ROOT}/ml-nccl-rdma-sharp-plugins-pr/${BUILD_NUMBER}"
-        NCCL_SRC_DIR                = "${WORKSPACE}/nccl"
-        NCCL_GIT_URL                = "git@gitlab.com:Mellanox/nccl-sharp.git"
-        NCCL_GIT_BRANCH             = "master"
-        NCCL_DIR                    = "${NFS_WORKSPACE}/nccl"
         NCCL_RDMA_SHARP_PLUGINS_DIR = "${NFS_WORKSPACE}/nccl-rdma-sharp-plugins"
         NCCL_TESTS_DIR              = "${NFS_WORKSPACE}/nccl-tests"
     }
@@ -35,22 +31,6 @@ pipeline {
                 echo 'Preparations...'
                 sh 'mkdir -p ${ARTEFACT_DIR}'
                 sh 'mkdir -p ${NFS_WORKSPACE}'
-            }
-        }
-        stage('Checkout NCCL') {
-            steps {
-                dir("${NCCL_SRC_DIR}") {
-                    git branch: "${NCCL_GIT_BRANCH}",
-                    url: "${NCCL_GIT_URL}"
-                }
-            }
-        }
-        stage('Build NCCL') {
-            steps {
-                echo 'Building NCCL...'
-                sh 'set -o pipefail; ${WORKSPACE}/.ci/build_nccl.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl.log'
-                sh 'mkdir -p ${NCCL_DIR}'
-                sh 'cp -R ${NCCL_SRC_DIR}/build/* ${NCCL_DIR}'
             }
         }
         stage('Build nccl-rdma-sharp-plugins') {
@@ -76,7 +56,7 @@ pipeline {
         stage('Test nccl-rdma-sharp-plugins') {
             steps {
                 echo 'Testing nccl-rdma-sharp-plugins...'
-                sh 'set -o pipefail; ${WORKSPACE}/.ci/run_nccl_test.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
+                sh 'set -o pipefail; ${WORKSPACE}/.ci/run_nccl_tests.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
             }
         }
         stage('Configure SHARP: stop') {
