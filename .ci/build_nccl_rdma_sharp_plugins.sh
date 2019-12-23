@@ -1,6 +1,7 @@
 #!/bin/bash -leE
 
 SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
+cd ${SCRIPT_DIR}
 . ${SCRIPT_DIR}/settings.sh
 
 NCCL_RDMA_SHARP_PLUGINS_DIR="${NCCL_RDMA_SHARP_PLUGINS_DIR:-${WORKSPACE}/_install}"

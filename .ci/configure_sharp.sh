@@ -1,7 +1,18 @@
 #!/bin/bash -l
 
 SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
+cd ${SCRIPT_DIR}
 . ${SCRIPT_DIR}/settings.sh
+
+# 1 - run sanity tests, 0 - do not run
+VERIFY_SHARP_ENABLE=${VERIFY_SHARP_ENABLE:-1}
+
+if [ -z "${NCCL_DIR}" ]
+then
+    module load dev/nccl-nightly-stable
+else
+    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
+fi
 
 # Available values: start|stop|restart
 SHARP_MANAGER_ACTION="${1:-restart}"
@@ -23,29 +34,13 @@ then
     exit 1
 fi
 
-if [ -z "${NCCL_DIR}" ]
-then
-    echo "ERROR: NCCL_DIR is not defined"
-    echo "FAIL"
-    exit 1
-fi
-
 CONFIGURE_SHARP_TMP_DIR="${NFS_WORKSPACE}/configure_sharp_$$"
 mkdir -p ${CONFIGURE_SHARP_TMP_DIR}
 
-CFG_DIR="${SCRIPT_DIR}/cfg"
-HOSTFILE="${CFG_DIR}/$HOSTNAME/hostfile"
 export SHARP_CONF="${CONFIGURE_SHARP_TMP_DIR}"
 export SHARP_INI_FILE="${SHARP_CONF}/sharp_manager.ini"
 
 cp -R ${CFG_DIR}/$HOSTNAME/sharp_conf/* ${SHARP_CONF}
-
-if [ ! -f "${HOSTFILE}" ]
-then
-    echo "ERROR: ${HOSTFILE} doesn't exist or not accessible"
-    echo "FAIL"
-    exit 1
-fi
 
 if [ -f "${SHARP_CONF}/sharp_am_node.txt" ]
 then
@@ -63,7 +58,6 @@ SM_GUID=`sudo sminfo -C ${IB_DEV} -P1 | awk '{print $7}' | cut -d',' -f1`
 # SM_HOSTNAME=`sudo ibnetdiscover -H -C mlx5_0 -P1  | grep ${SM_GUID} | awk -F'"' '{print $2 }' | awk '{print $1}'`
 HOSTS=`cat $HOSTFILE | xargs | tr ' ' ','`
 
-echo "INFO: HOSTFILE = ${HOSTFILE}"
 echo "INFO: IB_DEV = ${IB_DEV}"
 echo "INFO: SM_GUID = ${SM_GUID}"
 # echo "INFO: SM_HOSTNAME = ${SM_HOSTNAME}"
@@ -131,8 +125,6 @@ check_opensm_conf() {
 verify_sharp() {
     echo "INFO: verify_sharp..."
 
-    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
-
     cp ${HPCX_SHARP_DIR}/share/sharp/examples/mpi/coll/* ${CONFIGURE_SHARP_TMP_DIR}
     cd ${CONFIGURE_SHARP_TMP_DIR}
     make CUDA=1 CUDA_HOME=${CUDA_HOME} SHARP_HOME="${HPCX_SHARP_DIR}"
@@ -146,16 +138,32 @@ verify_sharp() {
     ITERS=100
     SKIP=20
 
+    # -mca coll_hcoll_enable 0 - disable HCOLL
+    MPIRUN_COMMON_OPTIONS="\
+        -np 2 \
+        -H $HOSTS \
+        --map-by node \
+        -x LD_LIBRARY_PATH \
+    "
+
+    MPIRUN_SHARP_OPTIONS="\
+        -x SHARP_COLL_LOG_LEVEL=3 \
+        -x ENABLE_SHARP_COLL=1 \
+        -x SHARP_COLL_SAT_THRESHOLD=1 \
+        -x SHARP_COLL_ENABLE_SAT=1 \
+    "
+
+    echo "Environment for the reproducer:"
+    echo "export PATH=$PATH"
+    echo "export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+    echo "export OPAL_PREFIX=${OPAL_PREFIX}"
+
     # Test 1 (from ${HPCX_SHARP_DIR}/share/sharp/examples/mpi/coll/README):
     # Run allreduce barrier perf test on 2 hosts using port mlx5_0
     echo "Test 1..."
     CMD="mpirun \
-            -np 2 \
-            -H $HOSTS \
-            --map-by node \
-            -x ENABLE_SHARP_COLL=1 \
-            -x SHARP_COLL_LOG_LEVEL=3 \
-            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            ${MPIRUN_COMMON_OPTIONS} \
+            ${MPIRUN_SHARP_OPTIONS} \
             ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
                 -d mlx5_0:1 \
                 --iters $ITERS \
@@ -177,12 +185,8 @@ verify_sharp() {
     # Run allreduce perf test on 2 hosts using port mlx5_0 with CUDA buffers
     echo "Test 2..."
     CMD="mpirun \
-            -np 2 \
-            -H $HOSTS \
-            --map-by node \
-            -x ENABLE_SHARP_COLL=1 \
-            -x SHARP_COLL_LOG_LEVEL=3 \
-            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            ${MPIRUN_COMMON_OPTIONS} \
+            ${MPIRUN_SHARP_OPTIONS} \
             ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
                 -d mlx5_0:1 \
                 --iters $ITERS \
@@ -204,14 +208,11 @@ verify_sharp() {
     # Test 3 (from ${HPCX_SHARP_DIR}/share/sharp/examples/mpi/coll/README):
     # Run allreduce perf test on 2 hosts using port mlx5_0 with Streaming aggregation from 4B to 512MB
     echo "Test 3..."
+    # TODO: -x SHARP_COLL_ENABLE_SAT=1 - move
     CMD="mpirun \
-            -np 2 \
-            -H $HOSTS \
-            --map-by node \
-            -x ENABLE_SHARP_COLL=1 \
-            -x SHARP_COLL_LOG_LEVEL=3 \
+            ${MPIRUN_COMMON_OPTIONS} \
+            ${MPIRUN_SHARP_OPTIONS} \
             -x SHARP_COLL_ENABLE_SAT=1 \
-            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
             ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
                 -d mlx5_0:1 \
                 --iters $ITERS \
@@ -234,12 +235,8 @@ verify_sharp() {
     # Run iallreduce perf test on 2 hosts using port mlx5_0
     echo "Test 4..."
     CMD="mpirun \
-            -np 2 \
-            -H $HOSTS \
-            --map-by node \
-            -x ENABLE_SHARP_COLL=1 \
-            -x SHARP_COLL_LOG_LEVEL=3 \
-            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            ${MPIRUN_COMMON_OPTIONS} \
+            ${MPIRUN_SHARP_OPTIONS} \
             ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
                 -d mlx5_0:1 \
                 --iters $ITERS \
@@ -262,12 +259,8 @@ verify_sharp() {
     # Run iallreduce perf test on 2 hosts using port mlx5_0 with CUDA buffers
     echo "Test 5..."
     CMD="mpirun \
-            -np 2 \
-            -H $HOSTS \
-            --map-by node \
-            -x ENABLE_SHARP_COLL=1 \
-            -x SHARP_COLL_LOG_LEVEL=3 \
-            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            ${MPIRUN_COMMON_OPTIONS} \
+            ${MPIRUN_SHARP_OPTIONS} \
             ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
                 -d mlx5_0:1 \
                 --iters $ITERS \
@@ -291,13 +284,8 @@ verify_sharp() {
     # Run iallreduce perf test on 2 hosts using port mlx5_0 with Streaming aggregation from 4B to 512MB
     echo "Test 6..."
     CMD="mpirun \
-            -np 2 \
-            -H $HOSTS \
-            --map-by node \
-            -x ENABLE_SHARP_COLL=1 \
-            -x SHARP_COLL_LOG_LEVEL=3 \
-            -x SHARP_COLL_ENABLE_SAT=1 \
-            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            ${MPIRUN_COMMON_OPTIONS} \
+            ${MPIRUN_SHARP_OPTIONS} \
             ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
                 -d mlx5_0:1 \
                 --iters $ITERS \
@@ -317,13 +305,11 @@ verify_sharp() {
     fi
     echo "Test 6... DONE"
 
-    # Test 7: Without SAT
+    # Test 7 (from the SHARP deployment guide): Without SAT
     echo "Test 7..."
     CMD="$OMPI_HOME/bin/mpirun \
+            ${MPIRUN_COMMON_OPTIONS} \
             --bind-to core \
-            --map-by node \
-            -host $HOSTS \
-            -np 2 \
             -mca btl_openib_warn_default_gid_prefix 0 \
             -mca rmaps_dist_device mlx5_0:1 \
             -mca rmaps_base_mapping_policy dist:span \
@@ -334,7 +320,7 @@ verify_sharp() {
             -x HCOLL_ML_DISABLE_REDUCE=1 \
             -x HCOLL_ENABLE_MCAST_ALL=1 \
             -x HCOLL_MCAST_NP=1 \
-            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            -x LD_LIBRARY_PATH \
             -x HCOLL_ENABLE_SHARP=2 \
             -x SHARP_COLL_LOG_LEVEL=3 \
             -x SHARP_COLL_GROUP_RESOURCE_POLICY=1 \
@@ -363,13 +349,10 @@ verify_sharp() {
     fi
     echo "Test 7... DONE"
 
-    # Test 8: With SAT
+    # Test 8 (from the SHARP deployment guide): With SAT
     echo "Test 8..."
     CMD="$OMPI_HOME/bin/mpirun \
-            --bind-to core \
-            --map-by node \
-            -host $HOSTS \
-            -np 2 \
+            ${MPIRUN_COMMON_OPTIONS} \
             -mca btl_openib_warn_default_gid_prefix 0 \
             -mca rmaps_dist_device mlx5_0:1 \
             -mca rmaps_base_mapping_policy dist:span \
@@ -380,7 +363,7 @@ verify_sharp() {
             -x HCOLL_ML_DISABLE_REDUCE=1 \
             -x HCOLL_ENABLE_MCAST_ALL=1 \
             -x HCOLL_MCAST_NP=1 \
-            -x LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
+            -x LD_LIBRARY_PATH \
             -x HCOLL_ENABLE_SHARP=2 \
             -x SHARP_COLL_LOG_LEVEL=3 \
             -x SHARP_COLL_GROUP_RESOURCE_POLICY=1 \
@@ -427,7 +410,7 @@ then
     exit 1
 fi
 
-if [ "${SHARP_MANAGER_ACTION}" != "stop" ]
+if [ "${SHARP_MANAGER_ACTION}" != "stop" ] && [ "${VERIFY_SHARP_ENABLE}" -eq 1 ]
 then
     verify_sharp
 fi
