@@ -391,7 +391,7 @@ ncclResult_t ncclIbListen(int dev, void* opaqueHandle, void** listenComm) {
   comm = malloc(sizeof(struct ncclIbListenComm));
   memset(comm, 0, sizeof(struct ncclIbListenComm));
   struct ncclIbHandle* handle = (struct ncclIbHandle*) opaqueHandle;
-  static_assert(sizeof(struct ncclIbHandle) < NCCL_NET_HANDLE_MAXSIZE, "ncclIbHandle size too large");
+  NCCL_STATIC_ASSERT(sizeof(struct ncclIbHandle) < NCCL_NET_HANDLE_MAXSIZE, "ncclIbHandle size too large");
   comm->dev = dev;
   NCCLCHECK(GetSocketAddr(&(handle->connectAddr)));
   NCCLCHECK(createListenSocket(&comm->fd, &handle->connectAddr));
