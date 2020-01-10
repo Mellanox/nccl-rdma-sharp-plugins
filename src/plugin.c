@@ -26,13 +26,16 @@
 #define USE_RDMA_WRITE 1
 #define USE_RDMA_SEND_INLINE 0
 #define MAXNAMESIZE 64
+ #define IB_DEVICE_SYSFS_FMT "/sys/class/infiniband/%s/device/%s"
 static char ncclIbIfName[MAX_IF_NAME_SIZE];
 static union socketAddress ncclIbIfAddr;
 static int ncclNIbDevs = -1;
+static int ncclNSharpDevs = -1;
 struct ncclIbDev {
   int device;
   uint8_t port;
   uint8_t link;
+  uint8_t isSharpDev;
   struct ibv_context* context;
   char devName[MAXNAMESIZE];
 };
@@ -87,6 +90,15 @@ NCCL_PARAM(IbDisable, "IBEXT_DISABLE", 0);
 
 ncclDebugLogger_t pluginLogFunction;
 
+int devCompare(const void *a, const void *b) {
+  const struct ncclIbDev *d1 = (const struct ncclIbDev *)a;
+  const struct ncclIbDev *d2 = (const struct ncclIbDev *)b;
+
+  if (d1->isSharpDev == d2->isSharpDev) { return 0; }
+  else if (d1->isSharpDev > d2->isSharpDev) { return -1; }
+  else { return 1; }
+}
+
 ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
   struct timeval tval;
   gettimeofday(&tval, NULL);
@@ -101,6 +113,7 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
     wrap_ibv_fork_init();
     if (ncclNIbDevs == -1) {
       ncclNIbDevs = 0;
+      ncclNSharpDevs = 0;
       if (findInterfaces(ncclIbIfName, &ncclIbIfAddr, MAX_IF_NAME_SIZE, 1) != 1) {
         WARN("NET/IB : No IP interface found.");
         return ncclInternalError;
@@ -133,6 +146,7 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
         }
         for (int port = 1; port <= devAttr.phys_port_cnt; port++) {
           struct ibv_port_attr portAttr;
+          long vendorId, devId;
           if (ncclSuccess != wrap_ibv_query_port(context, port, &portAttr)) {
             WARN("NET/IB : Unable to query port %d", port);
             continue;
@@ -152,6 +166,16 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
           ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
           ncclIbDevs[ncclNIbDevs].context = context;
           strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
+          readFileNumber(&vendorId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "vendor");
+          readFileNumber(&devId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "device");
+          ncclIbDevs[ncclNIbDevs].isSharpDev = 0;
+          if ((portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) &&
+              (vendorId == 0x15b3) &&           // Mellanox vendor
+              (devId == 4123 || devId == 4124)) //ConnectX-6
+          {
+            ncclIbDevs[ncclNIbDevs].isSharpDev = 1;
+            ncclNSharpDevs++;
+          }
           ncclNIbDevs++;
           found++;
           pthread_create(&ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, context);
@@ -163,11 +187,17 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
     if (ncclNIbDevs == 0) {
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : No device found.");
     } else {
+      // sort devices on sharp capable
+      if (ncclNSharpDevs && (ncclNSharpDevs != ncclNIbDevs)) {
+        qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), devCompare);
+      }
+
       char line[1024];
       line[0] = '\0';
       for (int d=0; d<ncclNIbDevs; d++) {
-        snprintf(line+strlen(line), 1023-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
-            ncclIbDevs[d].port, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
+        snprintf(line+strlen(line), 1023-strlen(line), " [%d]%s:%d/%s%s", d, ncclIbDevs[d].devName,
+            ncclIbDevs[d].port, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE",
+            ncclIbDevs[d].isSharpDev ? "/SHARP" : "");
       }
       line[1023] = '\0';
       char addrline[1024];
@@ -180,6 +210,11 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
 
 ncclResult_t ncclIbDevices(int* ndev) {
   *ndev = ncclNIbDevs;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbSharpDevices(int* ndev) {
+  *ndev = ncclNSharpDevs;
   return ncclSuccess;
 }
 
@@ -1229,7 +1264,7 @@ ncclResult_t ncclSharpCloseColl(void* collComm) {
 ncclCollNet_t NCCL_COLLNET_PLUGIN_SYMBOL = {
   "SHARP",
   ncclIbInit,
-  ncclIbDevices,
+  ncclIbSharpDevices,
   ncclIbPciPath,
   ncclIbPtrSupport,
   ncclIbListen,
