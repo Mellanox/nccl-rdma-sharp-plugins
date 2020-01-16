@@ -12,4 +12,5 @@ libnccl_net_la_LDFLAGS   = $(LDFLAGS)
 libnccl_net_la_SOURCES = \
 	ibvwrap.c \
 	utils.c	\
-	plugin.c
+	ib_plugin.c \
+	sharp_plugin.c
