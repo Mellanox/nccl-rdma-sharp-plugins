@@ -24,6 +24,15 @@ ncclResult_t ncclIbMalloc(void** ptr, size_t size) {
   return ncclSuccess;
 }
 
+int devCompare(const void *a, const void *b) {
+  const struct ncclIbDev *d1 = (const struct ncclIbDev *)a;
+  const struct ncclIbDev *d2 = (const struct ncclIbDev *)b;
+
+  if (d1->isSharpDev == d2->isSharpDev) { return 0; }
+  else if (d1->isSharpDev > d2->isSharpDev) { return -1; }
+  else { return 1; }
+}
+
 int parseStringList(const char* string, struct netIf* ifList, int maxList) {
   if (!string) return 0;
 
@@ -136,3 +145,38 @@ int readFileNumber(long *value, const char *filename_fmt, ...)
   *value = n;
   return 0;
 }
+
+extern ncclNet_t ib_plugin;
+extern ncclNet_t ucx_plugin;
+extern ncclNet_t NCCL_PLUGIN_SYMBOL;
+ncclDebugLogger_t pluginLogFunction;
+
+ncclResult_t pluginInit(ncclDebugLogger_t logFunction){
+  pluginLogFunction = logFunction;
+  NCCL_PLUGIN_SYMBOL = ib_plugin;
+#ifdef HAVE_UCX_PLUGIN
+  const char *p2pLayer = getenv("NCCL_PLUGIN_P2P");
+  if ((p2pLayer != NULL) && !strcasecmp(p2pLayer, "ucx"))  NCCL_PLUGIN_SYMBOL = ucx_plugin;
+#endif
+  return NCCL_PLUGIN_SYMBOL.init(logFunction);
+}
+
+ncclNet_t NCCL_PLUGIN_SYMBOL = {
+  "NCCL RDMA SHARP Plugin",
+  pluginInit,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL
+};

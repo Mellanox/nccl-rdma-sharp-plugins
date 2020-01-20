@@ -25,7 +25,7 @@
 
 extern ncclNet_t NCCL_PLUGIN_SYMBOL;
 extern struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
-extern int ncclNSharpDevs;
+int ncclNSharpDevs = -1;
 
 struct ncclSharpRequest {
   void *sharpRequest;

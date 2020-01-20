@@ -31,7 +31,7 @@
 static char ncclIbIfName[MAX_IF_NAME_SIZE];
 static union socketAddress ncclIbIfAddr;
 static int ncclNIbDevs = -1;
-int ncclNSharpDevs = -1;
+extern int ncclNSharpDevs;
 
 #define MAX_IB_PORT 15
 struct userIbDev {
@@ -67,23 +67,12 @@ static void* ncclIbAsyncThreadMain(void* args) {
 
 NCCL_PARAM(IbDisable, "IBEXT_DISABLE", 0);
 
-ncclDebugLogger_t pluginLogFunction;
-
-int devCompare(const void *a, const void *b) {
-  const struct ncclIbDev *d1 = (const struct ncclIbDev *)a;
-  const struct ncclIbDev *d2 = (const struct ncclIbDev *)b;
-
-  if (d1->isSharpDev == d2->isSharpDev) { return 0; }
-  else if (d1->isSharpDev > d2->isSharpDev) { return -1; }
-  else { return 1; }
-}
+extern ncclDebugLogger_t pluginLogFunction;
 
 ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
   struct timeval tval;
   gettimeofday(&tval, NULL);
   srand((int) tval.tv_usec);
-
-  pluginLogFunction = logFunction;
 
   if (ncclParamIbDisable()) return ncclInternalError;
 
@@ -844,7 +833,7 @@ ncclResult_t ncclIbCloseListen(void* listenComm) {
   return ncclSuccess;
 }
 
-ncclNet_t NCCL_PLUGIN_SYMBOL = {
+ncclNet_t ib_plugin = {
   "IBext",
   ncclIbInit,
   ncclIbDevices,
