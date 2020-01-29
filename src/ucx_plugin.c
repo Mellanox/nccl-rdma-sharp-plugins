@@ -131,10 +131,17 @@ struct ucx_request {
 };
 typedef struct ucx_request ucx_request;
 
+struct ep_list {
+  int fd;
+  struct ep_list *next;
+};
+
 struct nccl_ucx_worker {
   ucp_context_h ctx;
   ucp_worker_h worker;
   int count;
+  struct ep_list *eps;
+  ucp_tag_t last_tag;
 };
 static struct nccl_ucx_worker workers[MAX_IB_DEVS];
 
@@ -256,11 +263,13 @@ static ncclResult_t ucx_get_ctx_and_worker(int dev, ucp_context_h *ctx, ucp_work
   if (workers[dev].count == 0) {
     ucx_init_context(&workers[dev].ctx, dev);
     ucx_init_worker(workers[dev].ctx, &workers[dev].worker);
+    workers[dev].last_tag = tag;
   }
   *ctx = workers[dev].ctx;
   *worker = workers[dev].worker;
   if (newtag != NULL) {
-    *newtag = tag + workers[dev].count;
+    workers[dev].last_tag += 1;
+    *newtag = workers[dev].last_tag;
   }
   ucp_worker_progress(*worker);
   workers[dev].count++;
@@ -275,6 +284,46 @@ static ncclResult_t ucx_get_ctx_and_worker(int dev, ucp_context_h *ctx, ucp_work
   return ncclSuccess;
 }
 
+static ncclResult_t nccl_ucx_free_worker(ucp_worker_h worker) {
+  pthread_mutex_lock(&nccl_ucx_lock);
+  int i;
+  for(i = 0; i < ncclNIbDevs; i++) {
+    if (worker == workers[i].worker) {
+      workers[i].count--;
+      if (workers[i].count == 0){
+        struct ep_list *ep = workers[i].eps;
+        while(ep){
+          int dummy;
+          struct ep_list *cur = ep;
+          NCCLCHECK(socketReceive(ep->fd, &dummy, sizeof(int)));
+          ep = ep->next;
+          close(cur->fd);
+          free(cur);
+        }
+        workers[i].eps=NULL;
+        ucp_worker_destroy(workers[i].worker);
+        ucp_cleanup(workers[i].ctx);
+        workers[i].worker = NULL;
+        workers[i].ctx = NULL;
+      }
+      break;
+    }
+  }
+  pthread_mutex_unlock(&nccl_ucx_lock);
+  return ncclSuccess;
+}
+static ncclResult_t nccl_ucx_add_ep(ucp_worker_h worker, int fd) {
+  int i;
+  for(i = 0; i < ncclNIbDevs; i++) {
+    if (worker == workers[i].worker) {
+      struct ep_list *new_ep = (struct ep_list*)malloc(sizeof(struct ep_list));
+      new_ep->fd = fd;
+      new_ep->next = workers[i].eps;
+      workers[i].eps = new_ep;
+      break;
+    }
+  }
+}
 NCCL_PARAM(UCXDisable, "UCX_DISABLE", 0);
 extern ncclDebugLogger_t pluginLogFunction;
 
@@ -415,6 +464,7 @@ ncclResult_t nccl_ucx_connect(int dev, void *handle, void **send_comm) {
   comm->tag = recv_handle->tag;
   comm->gpuFlush.enabled = 0;
   NCCLCHECK(ucx_worker_get_netaddress(comm->worker, &my_addr, &local_addr_len));
+  nccl_ucx_add_ep(comm->worker,comm->fd);
   INFO(NCCL_NET, "Worker address length: %zu", local_addr_len);
 
   ucp_mem_map_params_t mmap_params;
@@ -567,6 +617,7 @@ ncclResult_t ucx_recv_check(ucx_recv_comm *comm) {
     ucp_address_t *my_addr;
     size_t local_addr_len;
     NCCLCHECK(ucx_worker_get_netaddress(comm->worker, &my_addr, &local_addr_len));
+    nccl_ucx_add_ep(comm->worker, comm->fd);
     size_t msg_len = sizeof(connect_msg) + local_addr_len;
     comm->msg = calloc(1, msg_len);
     comm->msg->addr_len = local_addr_len;
@@ -656,6 +707,7 @@ ncclResult_t nccl_ucx_test(void *request, int *done, int *size) {
     *done = 1;
     if (size) *size = req->size;
     req->completed = 0;
+    ucp_request_free(req);
   }
   else {
     ucp_worker_progress(req->worker);
@@ -706,10 +758,11 @@ ncclResult_t nccl_ucx_close_send(void *send_comm) {
     void *close_req;
     if (comm->ep) {
       close_req = ucp_ep_close_nb(comm->ep, UCP_EP_CLOSE_MODE_FLUSH);
-      wait_close(comm->worker, close_req);  
+      wait_close(comm->worker, close_req);
+      int close = 1;
+      NCCLCHECK(socketSend(comm->fd, &close, sizeof(int)));
     }
-
-    close(comm->fd);
+    nccl_ucx_free_worker(comm->worker);
     free(comm);
   }
 
@@ -722,16 +775,17 @@ ncclResult_t nccl_ucx_close_recv(void *recv_comm) {
     ucp_rkey_destroy(comm->rkey);
 
     void *close_req;
-    if (comm->ep) {
-      close_req = ucp_ep_close_nb(comm->ep, UCP_EP_CLOSE_MODE_FLUSH);
-      wait_close(comm->worker, close_req);  
-    }
     if (comm->gpuFlush.enabled) {
       close_req = ucp_ep_close_nb(comm->gpuFlush.flush_ep, UCP_EP_CLOSE_MODE_FLUSH);
       wait_close(comm->worker, close_req);
     }
-
-    close(comm->fd);
+    if (comm->ep) {
+      close_req = ucp_ep_close_nb(comm->ep, UCP_EP_CLOSE_MODE_FLUSH);
+      wait_close(comm->worker, close_req);
+      int close=1;
+      NCCLCHECK(socketSend(comm->fd, &close, sizeof(int)));  
+    }
+    nccl_ucx_free_worker(comm->worker);
     free(comm);
   }
   
