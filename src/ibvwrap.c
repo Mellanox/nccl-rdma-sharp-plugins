@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <stdint.h>
 #include "ibvwrap.h"
 #include "nccl.h"
 
