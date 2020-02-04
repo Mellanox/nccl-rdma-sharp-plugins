@@ -62,6 +62,7 @@ NCCL_PARAM(IbTimeout, "IB_TIMEOUT", 14);
 NCCL_PARAM(IbRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbSl, "IB_SL", 0);
 NCCL_PARAM(IbTc, "IB_TC", 0);
+NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
 
 // Allocate memory to be potentially ibv_reg_mr'd. This needs to be
 // allocated on separate pages as those pages will be marked DONTFORK
@@ -214,9 +215,10 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
           ncclIbDevs[ncclNIbDevs].isSharpDev = 0;
           if ((portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) &&
               (vendorId == 0x15b3) &&           // Mellanox vendor
-              (devId == 4123 || devId == 4124) && ncclNSharpDevs < 2) //ConnectX-6
+              (devId == 4123 || devId == 4124)) //ConnectX-6
           {
             ncclIbDevs[ncclNIbDevs].isSharpDev = 1;
+            ncclIbDevs[ncclNIbDevs].maxQp = ncclParamSharpMaxComms();
             ncclNSharpDevs++;
           }
           ncclNIbDevs++;
