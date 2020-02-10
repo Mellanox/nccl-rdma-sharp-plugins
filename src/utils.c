@@ -177,6 +177,5 @@ ncclNet_t NCCL_PLUGIN_SYMBOL = {
   NULL,
   NULL,
   NULL,
-  NULL,
   NULL
 };

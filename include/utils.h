@@ -7,6 +7,7 @@
 #ifndef NCCL_UTILS_H_
 #define NCCL_UTILS_H_
 
+#include <stdint.h>
 #include "nccl.h"
 #include "nccl_net.h"
 #include "param.h"
@@ -19,12 +20,18 @@
 #define MAXNAMESIZE 64
 struct ncclIbDev {
   int device;
+  uint64_t guid;
   uint8_t port;
   uint8_t link;
   uint8_t isSharpDev;
+  int speed;
   struct ibv_context* context;
   char devName[MAXNAMESIZE];
+  char* pciPath;
+  int realPort;
+  int maxQp;
 };
+
 
 // Allocate memory to be potentially ibv_reg_mr'd. This needs to be
 // allocated on separate pages as those pages will be marked DONTFORK

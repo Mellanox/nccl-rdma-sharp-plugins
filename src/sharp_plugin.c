@@ -4,6 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+
+#include <stdint.h>
 #include "nccl.h"
 #include "nccl_net.h"
 #include "core.h"
@@ -407,12 +409,8 @@ ncclResult_t ncclSharpInit(ncclDebugLogger_t logFunction) {
   return NCCL_PLUGIN_SYMBOL.init(logFunction);
 }
 
-ncclResult_t ncclSharpPciPath(int dev, char** path) {
-  return NCCL_PLUGIN_SYMBOL.pciPath(dev, path);
-}
-
-ncclResult_t ncclSharpPtrSupport(int dev, int* supportedTypes) {
-  return NCCL_PLUGIN_SYMBOL.ptrSupport(dev, supportedTypes);
+ncclResult_t ncclSharpGetProperties(int dev, ncclNetProperties_t* props) {
+  return NCCL_PLUGIN_SYMBOL.getProperties(dev, props);
 }
 
 ncclResult_t ncclSharpListen(int dev, void* opaqueHandle, void** listenComm) {
@@ -432,8 +430,7 @@ ncclCollNet_t NCCL_COLLNET_PLUGIN_SYMBOL = {
   "SHARP",
   ncclSharpInit,
   ncclSharpDevices,
-  ncclSharpPciPath,
-  ncclSharpPtrSupport,
+  ncclSharpGetProperties,
   ncclSharpListen,
   ncclSharpConnect,
   ncclSharpReduceSupport,

@@ -11,11 +11,11 @@
 #include <cuda_fp16.h>
 
 #define NCCL_MAJOR 2
-#define NCCL_MINOR 4
-#define NCCL_PATCH 2
-#define NCCL_SUFFIX ""
+#define NCCL_MINOR 6
+#define NCCL_PATCH 0
+#define NCCL_SUFFIX "a0"
 
-#define NCCL_VERSION_CODE 2402
+#define NCCL_VERSION_CODE 2600
 #define NCCL_VERSION(X,Y,Z) ((X) * 1000 + (Y) * 100 + (Z))
 
 #ifdef __cplusplus
@@ -41,7 +41,7 @@ typedef enum { ncclSuccess                 =  0,
  * This integer is coded with the MAJOR, MINOR and PATCH level of the
  * NCCL library
  */
-ncclResult_t ncclGetVersion(int *version);
+ncclResult_t  ncclGetVersion(int *version);
 ncclResult_t pncclGetVersion(int *version);
 
 /* Generates an Id to be used in ncclCommInitRank. ncclGetUniqueId should be
@@ -244,7 +244,8 @@ ncclResult_t pncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcou
  * Start a group call. All subsequent calls to NCCL may not block due to
  * inter-CPU synchronization.
  */
-ncclResult_t ncclGroupStart();
+ncclResult_t  ncclGroupStart();
+ncclResult_t pncclGroupStart();
 
 /*
  * Group End
@@ -252,7 +253,8 @@ ncclResult_t ncclGroupStart();
  * End a group call. Wait for all calls since ncclGroupStart to complete
  * before returning.
  */
-ncclResult_t ncclGroupEnd();
+ncclResult_t  ncclGroupEnd();
+ncclResult_t pncclGroupEnd();
 
 #ifdef __cplusplus
 } // end extern "C"

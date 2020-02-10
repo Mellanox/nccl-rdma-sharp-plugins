@@ -7,6 +7,8 @@
  ************************************************************************/
 
 
+
+#include <stdint.h>
 #include "nccl.h"
 #include "nccl_net.h"
 #include "core.h"
@@ -91,14 +93,22 @@ ncclResult_t nccl_ucx_gdr_support(int ibDev) {
   return ncclSuccess;
 }
 
-ncclResult_t nccl_ucx_ptr_support(int dev, int* supported_types) {
-  *supported_types = NCCL_PTR_HOST;
 
+
+ncclResult_t nccl_ucx_get_properties(int dev, ncclNetProperties_t* props)
+{
+  props->name = ncclIbDevs[dev].devName;
+  props->pciPath = ncclIbDevs[dev].pciPath;
+  props->guid = ncclIbDevs[dev].guid;
+  props->ptrSupport = NCCL_PTR_HOST;
   if (nccl_ucx_gdr_support(dev) != ncclSuccess) {
-    INFO(NCCL_NET,"NET/UCX : GPU Direct RDMA Disabled for HCA %d '%s' (no module)", dev, ncclIbDevs[dev].devName);
-    return ncclSuccess;
+    INFO(NCCL_NET,"NET/IB : GPU Direct RDMA Disabled for HCA %d '%s' (no module)", dev, ncclIbDevs[dev].devName);
+  } else {
+    props->ptrSupport |= NCCL_PTR_CUDA;
   }
-  *supported_types |= NCCL_PTR_CUDA;
+  props->speed = ncclIbDevs[dev].speed;
+  props->port = ncclIbDevs[dev].port + ncclIbDevs[dev].realPort;
+  props->maxComms = ncclIbDevs[dev].maxQp;
   return ncclSuccess;
 }
 
@@ -324,6 +334,41 @@ static ncclResult_t nccl_ucx_add_ep(ucp_worker_h worker, int fd) {
     }
   }
 }
+
+static ncclResult_t ncclIbGetPciPath(char* devName, char** path, int* realPort) {
+  char devicePath[PATH_MAX];
+  snprintf(devicePath, PATH_MAX, "/sys/class/infiniband/%s/device", devName);
+  char* p = realpath(devicePath, NULL);
+  if (p == NULL) {
+    WARN("Could not find real path of %s", *devicePath);
+  } else {
+    // Merge multi-port NICs into the same PCI device
+    p[strlen(p)-1] = '0';
+    // And keep the real port aside (the ibv port is always 1 on recent cards)
+    *realPort = 0;
+    for (int d=0; d<ncclNIbDevs; d++) {
+      if (strcmp(p, ncclIbDevs[d].pciPath) == 0) (*realPort)++;
+    }
+  }
+  *path = p;
+  return ncclSuccess;
+}
+
+static int ibvWidths[] = { 1, 4, 8, 12 };
+static int ibvSpeeds[] = { 2500, 5000, 10000, 10000, 14000, 25000 };
+static int firstBitSet(int val, int max) {
+  int i = 0;
+  while (i<max && ((val & (1<<i)) == 0)) i++;
+  return i;
+}
+static int ncclIbWidth(int width) {
+  return ibvWidths[firstBitSet(width, sizeof(ibvWidths)/sizeof(int)-1)];
+}
+
+static int ncclIbSpeed(int speed) {
+  return ibvSpeeds[firstBitSet(speed, sizeof(ibvSpeeds)/sizeof(int)-1)];
+}
+
 NCCL_PARAM(UCXDisable, "UCX_DISABLE", 0);
 extern ncclDebugLogger_t pluginLogFunction;
 
@@ -340,7 +385,7 @@ ncclResult_t nccl_ucx_init(ncclDebugLogger_t logFunction) {
     if (ncclNIbDevs == -1) {
       ncclNIbDevs = 0;
       ncclNSharpDevs = 0;
-      if (findInterfaces(if_name, &nccl_ucx_if_addr, MAX_IF_NAME_SIZE, 1) != 1){
+      if (findInterfaces(if_name, &nccl_ucx_if_addr, MAX_IF_NAME_SIZE, 1) != 1) {
         WARN("NET/UCX : No IP interface found.");
         return ncclInternalError;
       }
@@ -388,10 +433,14 @@ ncclResult_t nccl_ucx_init(ncclDebugLogger_t logFunction) {
           TRACE(NCCL_INIT|NCCL_NET,"NET/UCX: [%d] %s:%d/%s ", d, devices[d]->name, port,
               portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
           ncclIbDevs[ncclNIbDevs].device = d;
+          ncclIbDevs[ncclNIbDevs].guid = devAttr.sys_image_guid;
           ncclIbDevs[ncclNIbDevs].port = port;
           ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
+	  ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portAttr.active_speed) * ncclIbWidth(portAttr.active_width);
           ncclIbDevs[ncclNIbDevs].context = context;
           strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
+	  NCCLCHECK(ncclIbGetPciPath(ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort));
+          ncclIbDevs[ncclNIbDevs].maxQp = devAttr.max_qp;
           readFileNumber(&vendorId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "vendor");
           readFileNumber(&devId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "device");
           ncclIbDevs[ncclNIbDevs].isSharpDev = 0;
@@ -400,6 +449,7 @@ ncclResult_t nccl_ucx_init(ncclDebugLogger_t logFunction) {
               (devId == 4123 || devId == 4124)) //ConnectX-6
           {
             ncclIbDevs[ncclNIbDevs].isSharpDev = 1;
+            ncclIbDevs[ncclNIbDevs].maxQp = 1; //TODO: ncclParamSharpMaxComms();
             ncclNSharpDevs++;
           }
           ncclNIbDevs++;
@@ -806,8 +856,7 @@ ncclNet_t ucx_plugin ={
     "UCX",
     nccl_ucx_init,
     nccl_ucx_devices,
-    nccl_ucx_pci_path,
-    nccl_ucx_ptr_support,
+    nccl_ucx_get_properties,
     nccl_ucx_listen,
     nccl_ucx_connect,
     nccl_ucx_accept,
