@@ -74,6 +74,8 @@ AC_CHECK_HEADER([infiniband/verbs.h], [],
                 [AC_MSG_FAILURE([ibverbs header files not found])])
 AC_CHECK_LIB([ibverbs], [ibv_get_device_list],
             [],[AC_MSG_FAILURE([libibverbs not found]);])
+AC_CHECK_DECLS(IBV_ACCESS_RELAXED_ORDERING, [], [],
+                    [[#include <infiniband/verbs.h>]])
 
 
 # check for sharp

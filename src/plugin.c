@@ -62,6 +62,7 @@ NCCL_PARAM(IbTimeout, "IB_TIMEOUT", 14);
 NCCL_PARAM(IbRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbSl, "IB_SL", 0);
 NCCL_PARAM(IbTc, "IB_TC", 0);
+NCCL_PARAM(IbPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 0);
 NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
 
 // Allocate memory to be potentially ibv_reg_mr'd. This needs to be
@@ -151,6 +152,11 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
   if (ncclNIbDevs == -1) {
     pthread_mutex_lock(&ncclIbLock);
     wrap_ibv_fork_init();
+
+    if (ncclParamIbPciRelaxedOrdering() && !IBV_ACCESS_RELAXED_ORDERING) {
+      WARN("NET/IB: PCI relaxed order memory access requested but not supported");
+    }
+
     if (ncclNIbDevs == -1) {
       ncclNIbDevs = 0;
       ncclNSharpDevs = 0;
@@ -655,6 +661,7 @@ ncclResult_t ncclIbTest(void* request, int* done, int* size);
 ncclResult_t ncclIbRegMr(void* comm, void* data, int size, int type, void** mhandle) {
   struct ncclIbVerbs* verbs = (struct ncclIbVerbs*)comm;
   uint64_t addr = (uint64_t)data;
+  unsigned flags;
   assert(size > 0);
 
   // Deregister / register
@@ -662,7 +669,11 @@ ncclResult_t ncclIbRegMr(void* comm, void* data, int size, int type, void** mhan
   uint64_t regSize = addr+size - regAddr;
   regSize = ((regSize + REG_ALIGN-1) / REG_ALIGN ) * REG_ALIGN;
   struct ibv_mr* mr;
-  NCCLCHECK(wrap_ibv_reg_mr(&mr, verbs->pd, (void*)regAddr, regSize, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ));
+  flags = IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ;
+  if (ncclParamIbPciRelaxedOrdering()) {
+	flags |= IBV_ACCESS_RELAXED_ORDERING;
+  }
+  NCCLCHECK(wrap_ibv_reg_mr(&mr, verbs->pd, (void*)regAddr, regSize, flags));
   *mhandle = (void*)mr;
   TRACE(NCCL_INIT,"regAddr %lx size %ld rkey %x", regAddr, regSize, mr->rkey);
   return ncclSuccess;

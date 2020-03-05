@@ -11,9 +11,13 @@
 
 #ifndef NCCL_IBVWRAP_H_
 #define NCCL_IBVWRAP_H_
-
+#include "config.h"
 #include "core.h"
 #include <infiniband/verbs.h>
+
+#if !HAVE_DECL_IBV_ACCESS_RELAXED_ORDERING
+#  define IBV_ACCESS_RELAXED_ORDERING               0
+#endif
 
 ncclResult_t wrap_ibv_fork_init(void);
 ncclResult_t wrap_ibv_get_device_list(struct ibv_device ***ret, int *num_devices);
