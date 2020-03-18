@@ -33,8 +33,6 @@ AC_SUBST(MINOR_VERSION)
 AC_SUBST([BUILD_DATE], [$(date +'%b/%d/%Y')])
 AC_SUBST([BUILD_TIME], [$(date +'%H:%M:%S')])
 
-
-
 # Checks for programs.
 AC_GNU_SOURCE
 AC_PROG_CC_STDC
@@ -77,27 +75,69 @@ AC_CHECK_LIB([ibverbs], [ibv_get_device_list],
 AC_CHECK_DECLS(IBV_ACCESS_RELAXED_ORDERING, [], [],
                     [[#include <infiniband/verbs.h>]])
 
-#check for UCX
-AC_ARG_WITH([ucx],
-        AC_HELP_STRING([--with-ucx=PATH], [Path to UCX installation]),
-        [AS_IF([test "x$with_ucx" != xno],
-          [AC_SUBST([UCX_PATH], $with_ucx)
-           AC_SUBST([HAVE_UCX], [yes])],
-          [AC_SUBST([HAVE_UCX], [no])])],
-        [AS_IF([test -d "$HPCX_UCX_DIR"],
-          [AC_SUBST([UCX_PATH], $HPCX_UCX_DIR)
-           AC_SUBST([HAVE_UCX], [yes])],
-          [AC_SUBST([HAVE_UCX], [no])])])
-
-AM_CONDITIONAL([HAVE_UCX], [test "x$HAVE_UCX" = "xyes"])
-if test "x$HAVE_UCX" = "xyes"; then
-  AC_SUBST(UCX_LIBS,   "-L$UCX_PATH/lib -lucp -luct -lucm -lucs")
-  AC_SUBST(UCX_CFLAGS, "-I$UCX_PATH/include")
-  AC_DEFINE(HAVE_UCX_PLUGIN, [1], [Define if using UCX plugin])
-  AC_MSG_NOTICE("UCX location ... $UCX_PATH")
-else
-  AC_MSG_NOTICE("UCX disabled")
-fi
+ucx_happy="no"
+AC_ARG_WITH([ucx], [AS_HELP_STRING([--with-ucx=(DIR)], [Enable the use of UCX (default is guess).])], [], [with_ucx=guess])
+AS_IF([test "x$with_ucx" != "xno"],
+[
+    save_CPPFLAGS="$CPPFLAGS"
+    save_CFLAGS="$CFLAGS"
+    save_LDFLAGS="$LDFLAGS"
+    AS_IF([test ! -z "$with_ucx" -a "x$with_ucx" != "xyes" -a "x$with_ucx" != "xguess"],
+    [
+        ucx_check_ucx_dir="$with_ucx"
+        AS_IF([test -d "$with_ucx/lib64"],
+        [
+            libsuff="64"
+        ],
+        [
+            libsuff=""
+        ])
+        ucx_check_ucx_libdir="$with_ucx/lib$libsuff"
+        CPPFLAGS="-I$with_ucx/include $save_CPPFLAGS"
+        LDFLAGS="-L$ucx_check_ucx_libdir $save_LDFLAGS"
+    ])
+    AS_IF([test ! -z "$with_ucx_libdir" -a "x$with_ucx_libdir" != "xyes"],
+    [
+        ucx_check_ucx_libdir="$with_ucx_libdir"
+        LDFLAGS="-L$ucx_check_ucx_libdir $save_LDFLAGS"
+    ])
+    AC_CHECK_HEADERS([ucp/api/ucp.h],
+    [
+        AC_CHECK_LIB([ucp], [ucp_tag_send_nb],
+        [
+            ucx_happy="yes"
+        ],
+        [
+            ucx_happy="no"
+        ], [-luct -lucm -lucs])
+    ],
+    [
+        ucx_happy="no"
+    ])
+    CFLAGS="$save_CFLAGS"
+    CPPFLAGS="$save_CPPFLAGS"
+    LDFLAGS="$save_LDFLAGS"
+    AS_IF([test "x$ucx_happy" = "xyes"],
+    [
+        AS_IF([test ! -z "$ucx_check_ucx_dir"],
+        [
+            AC_SUBST(UCX_CPPFLAGS, "-I$ucx_check_ucx_dir/include/")
+        ])
+        AS_IF([test ! -z "$ucx_check_ucx_libdir"],
+        [
+            AC_SUBST(UCX_LDFLAGS, "-L$ucx_check_ucx_libdir")
+        ])
+        AC_SUBST(UCX_LIBADD, "-lucp -lucs -lucm -luct")
+        AC_DEFINE(HAVE_UCX_PLUGIN, [1], [Define if using UCX plugin])
+    ],
+    [
+        AC_MSG_WARN(["UCX packages cannot be found"])
+    ])
+],
+[
+    AC_MSG_WARN(["UCX plugin was explicitly disabled"])
+])
+AM_CONDITIONAL([HAVE_UCX], [test "x$ucx_happy" != xno])
 
 # check for sharp
 AC_ARG_WITH([sharp],

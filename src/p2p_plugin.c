@@ -11,6 +11,7 @@
 
 #include "nccl.h"
 #include "nccl_net.h"
+#include "debug.h"
 
 extern ncclNet_t ucxPlugin;
 extern ncclNet_t ibPlugin;
@@ -19,7 +20,7 @@ ncclDebugLogger_t pluginLogFunction;
 ncclResult_t pluginInit(ncclDebugLogger_t logFunction);
 
 ncclNet_t NCCL_PLUGIN_SYMBOL = {
-  "NCCL RDMA SHARP Plugin",
+  "NCCL RDMA Plugin",
   pluginInit,
   NULL,
   NULL,
@@ -37,13 +38,18 @@ ncclNet_t NCCL_PLUGIN_SYMBOL = {
   NULL
 };
 
-
-ncclResult_t pluginInit(ncclDebugLogger_t logFunction){
+ncclResult_t pluginInit(ncclDebugLogger_t logFunction) {
   pluginLogFunction = logFunction;
   NCCL_PLUGIN_SYMBOL = ibPlugin;
-#ifdef HAVE_UCX_PLUGIN
   const char *p2pLayer = getenv("NCCL_PLUGIN_P2P");
-  if ((p2pLayer != NULL) && !strcasecmp(p2pLayer, "ucx"))  NCCL_PLUGIN_SYMBOL = ucxPlugin;
+  if (p2pLayer != NULL) {
+    if (!strcasecmp(p2pLayer, "ib")) NCCL_PLUGIN_SYMBOL = ibPlugin;
+#ifdef HAVE_UCX_PLUGIN
+    else if (!strcasecmp(p2pLayer, "ucx")) NCCL_PLUGIN_SYMBOL = ucxPlugin;
 #endif
+    else {
+      WARN("Invalid value %s for NCCL_PLUGIN_P2P, using default.", p2pLayer);
+    }
+  }
   return NCCL_PLUGIN_SYMBOL.init(logFunction);
 }
