@@ -36,13 +36,19 @@ pipeline {
         stage('Build nccl-rdma-sharp-plugins') {
             steps {
                 echo 'Building nccl-rdma-sharp-plugins...'
-                sh 'set -o pipefail; ${WORKSPACE}/.ci/build_nccl_rdma_sharp_plugins.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl_rdma_sharp_plugins.log'
+                sh """#!/bin/bash
+                    set -o pipefail
+                    ${WORKSPACE}/.ci/build_nccl_rdma_sharp_plugins.sh 2>&1 | tee ${ARTEFACT_DIR}/build_nccl_rdma_sharp_plugins.log
+                    """
             }
         }
         stage('Configure SHARP: startup') {
             steps {
                 echo 'Configure SHARP: startup...'
-                sh 'set -o pipefail; ${WORKSPACE}/.ci/configure_sharp.sh 2>&1 | tee ${ARTEFACT_DIR}/configure_sharp_startup.log'
+                sh """#!/bin/bash
+                    set -o pipefail
+                    ${WORKSPACE}/.ci/configure_sharp.sh 2>&1 | tee ${ARTEFACT_DIR}/configure_sharp_startup.log
+                    """
             }
         }
         stage('Checkout NCCL tests') {
@@ -56,13 +62,19 @@ pipeline {
         stage('Test nccl-rdma-sharp-plugins') {
             steps {
                 echo 'Testing nccl-rdma-sharp-plugins...'
-                sh 'set -o pipefail; ${WORKSPACE}/.ci/run_nccl_tests.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log'
+                sh """#!/bin/bash
+                    set -o pipefail
+                    ${WORKSPACE}/.ci/run_nccl_tests.sh 2>&1 | tee ${ARTEFACT_DIR}/run_nccl_test.log
+                    """
             }
         }
         stage('Configure SHARP: stop') {
             steps {
                 echo 'Configure SHARP: stop...'
-                sh 'set -o pipefail; ${WORKSPACE}/.ci/configure_sharp.sh stop 2>&1 | tee ${ARTEFACT_DIR}/configure_sharp_stop.log'
+                sh """#!/bin/bash
+                    set -o pipefail
+                    ${WORKSPACE}/.ci/configure_sharp.sh stop 2>&1 | tee ${ARTEFACT_DIR}/configure_sharp_stop.log
+                    """
             }
         }
     }
