@@ -1,14 +1,17 @@
 #!/bin/bash -leE
 
 SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
-cd ${SCRIPT_DIR}
-. ${SCRIPT_DIR}/settings.sh
+cd "${SCRIPT_DIR}"
+# shellcheck source=settings.sh
+. "${SCRIPT_DIR}"/settings.sh
 
 GLOBAL_TEST_STATUS=0
 
 if [ -z "${NCCL_DIR}" ]
 then
     module load dev/nccl-nightly-stable
+else
+    export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
 fi
 
 if [ -z "${NCCL_RDMA_SHARP_PLUGINS_DIR}" ]
@@ -82,12 +85,12 @@ echo "NCCL_RDMA_SHARP_PLUGINS_DIR: ${NCCL_RDMA_SHARP_PLUGINS_DIR}"
 echo "MPI_HOME: ${MPI_HOME}"
 
 # Build NCCL-TESTS
-cd ${NCCL_TESTS_DIR}
+cd "${NCCL_TESTS_DIR}"
 make -j clean
 
 make -j CUDA_HOME="${CUDA_HOME}" NCCL_HOME="${NCCL_DIR}" MPI=1 MPI_HOME="${MPI_HOME}"
 
-export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${NCCL_RDMA_SHARP_PLUGINS_DIR}/lib:${LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${NCCL_RDMA_SHARP_PLUGINS_DIR}/lib:${LD_LIBRARY_PATH}"
 
 trim_multiple_spaces() {
     echo "$1" | sed -s "s|\ \ *| |g"
@@ -155,6 +158,7 @@ do
             then
                 MPIRUN_OPTIONS_SHARP=""
             else
+                # TODO change to SHARP_COLL_SAT_THRESHOLD=1 (32 - W/A for SHARP issue)
                 MPIRUN_OPTIONS_SHARP="\
                     -x SHARP_COLL_LOG_LEVEL=3 \
                     -x ENABLE_SHARP_COLL=1 \
@@ -163,7 +167,7 @@ do
                     -x SHARP_COLL_JOB_QUOTA_PAYLOAD_PER_OST=1024 \
                     -x SHARP_COLL_JOB_QUOTA_OSTS=256 \
                     -x SHARP_COLL_ENABLE_SAT=${ENABLE_SAT} \
-                    -x SHARP_COLL_SAT_THRESHOLD=1 \
+                    -x SHARP_COLL_SAT_THRESHOLD=32 \
                     "
             fi
 
@@ -213,10 +217,13 @@ do
                         ${MPI_APP}"
                     echo "# Test $i reproducer:"
                     echo "export PATH=${PATH}"
+                    echo ""
                     echo "export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+                    echo ""
+                    echo "export OPAL_PREFIX=${OPAL_PREFIX}"
+                    echo ""
                     trim_multiple_spaces "$CMD"
-                    $CMD
-                    if [ $? -ne 0 ]
+                    if ! $CMD
                     then
                         echo "# Test $i... failed"
                         GLOBAL_TEST_STATUS=1
@@ -224,7 +231,7 @@ do
                         echo "# Test $i... passed"
                     fi
 
-                    i=`expr $i + 1`
+                    i=$((i + 1))
                 done
             done
         done
