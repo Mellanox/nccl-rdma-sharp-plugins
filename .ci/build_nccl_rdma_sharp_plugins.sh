@@ -31,7 +31,10 @@ if ! make -j install; then
     exit 1
 fi
 
-echo "INFO: ${NCCL_RDMA_SHARP_PLUGINS_DIR}:"
-find "${NCCL_RDMA_SHARP_PLUGINS_DIR}" -type f
+if [ "$DEBUG" = "true" ]; then
+    echo "INFO: ${NCCL_RDMA_SHARP_PLUGINS_DIR}:"
+    # For debug purposes
+    find "${NCCL_RDMA_SHARP_PLUGINS_DIR}" -type f
+fi
 
 echo "PASS"
