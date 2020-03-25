@@ -16,6 +16,7 @@
 #define MAX_REQUESTS 128
 #define MAXNAMESIZE 64
 #define MAX_IB_DEVS 16
+#define IB_DEVICE_SYSFS_FMT "/sys/class/infiniband/%s/device/%s"
 
 #define MIN(a, b) ((a)<(b)?(a):(b))
 #define MAX(a, b) ((a)>(b)?(a):(b))
@@ -76,5 +77,24 @@
     goto label; \
   } \
 } while (0);
+
+struct ncclIbDev {
+  int device;
+  uint64_t guid;
+  uint8_t port;
+  uint8_t link;
+  uint8_t isSharpDev;
+  int speed;
+  struct ibv_context* context;
+  char devName[MAXNAMESIZE];
+  char* pciPath;
+  int realPort;
+  int maxQp;
+};
+
+struct userIbDev {
+  char devName[MAXNAMESIZE];
+  uint16_t port_en;
+};
 
 #endif // end include guard

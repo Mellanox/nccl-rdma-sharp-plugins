@@ -26,30 +26,10 @@
 
 #define USE_RDMA_WRITE 1
 #define USE_RDMA_SEND_INLINE 0
-#define IB_DEVICE_SYSFS_FMT "/sys/class/infiniband/%s/device/%s"
 static char ncclIbIfName[MAX_IF_NAME_SIZE];
 static union socketAddress ncclIbIfAddr;
 static int ncclNIbDevs = -1;
 extern int ncclNSharpDevs;
-struct ncclIbDev {
-  int device;
-  uint64_t guid;
-  uint8_t port;
-  uint8_t link;
-  uint8_t isSharpDev;
-  int speed;
-  struct ibv_context* context;
-  char devName[MAXNAMESIZE];
-  char* pciPath;
-  int realPort;
-  int maxQp;
-};
-
-#define MAX_IB_PORT 15
-struct userIbDev {
-  char devName[MAXNAMESIZE];
-  uint16_t port_en;
-};
 
 struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
 struct userIbDev userIbDevs[MAX_IB_DEVS];
@@ -114,15 +94,6 @@ static int ncclIbSpeed(int speed) {
 }
 
 extern ncclDebugLogger_t pluginLogFunction;
-
-int devCompare(const void *a, const void *b) {
-  const struct ncclIbDev *d1 = (const struct ncclIbDev *)a;
-  const struct ncclIbDev *d2 = (const struct ncclIbDev *)b;
-
-  if (d1->isSharpDev == d2->isSharpDev) { return 0; }
-  else if (d1->isSharpDev > d2->isSharpDev) { return -1; }
-  else { return 1; }
-}
 
 ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
   struct timeval tval;
