@@ -57,17 +57,6 @@ ncclResult_t nccl_ucx_devices(int* ndev) {
   return ncclSuccess;
 }
 
-ncclResult_t nccl_ucx_pci_path(int dev, char** path) {
-  char devicepath[PATH_MAX];
-  snprintf(devicepath, PATH_MAX, "/sys/class/infiniband/%s/device", ncclIbDevs[dev].devName);
-  *path = realpath(devicepath, NULL);
-  if (*path == NULL) {
-    WARN("Could not find real path of %s", devicepath);
-    return ncclSystemError;
-  }
-  return ncclSuccess;
-}
-
 ncclResult_t nccl_ucx_gdr_support(int ibDev) {
   static int moduleLoaded = -1;
   if (moduleLoaded == -1) {
@@ -328,7 +317,7 @@ static ncclResult_t nccl_ucx_add_ep(ucp_worker_h worker, int fd) {
   }
 }
 
-static ncclResult_t ncclIbGetPciPath(char* devName, char** path, int* realPort) {
+static ncclResult_t nccl_ucx_pci_path(char* devName, char** path, int* realPort) {
   char devicePath[PATH_MAX];
   snprintf(devicePath, PATH_MAX, "/sys/class/infiniband/%s/device", devName);
   char* p = realpath(devicePath, NULL);
@@ -431,7 +420,7 @@ ncclResult_t nccl_ucx_init(ncclDebugLogger_t logFunction) {
           ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portAttr.active_speed) * ncclIbWidth(portAttr.active_width);
           ncclIbDevs[ncclNIbDevs].context = context;
           strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
-          NCCLCHECK(ncclIbGetPciPath(ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort));
+          NCCLCHECK(nccl_ucx_pci_path(ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort));
           ncclIbDevs[ncclNIbDevs].maxQp = devAttr.max_qp;
           readFileNumber(&vendorId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "vendor");
           readFileNumber(&devId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "device");
