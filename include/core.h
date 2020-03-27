@@ -78,20 +78,6 @@
   } \
 } while (0);
 
-struct ncclIbDev {
-  int device;
-  uint64_t guid;
-  uint8_t port;
-  uint8_t link;
-  uint8_t isSharpDev;
-  int speed;
-  struct ibv_context* context;
-  char devName[MAXNAMESIZE];
-  char* pciPath;
-  int realPort;
-  int maxQp;
-};
-
 struct userIbDev {
   char devName[MAXNAMESIZE];
   uint16_t port_en;

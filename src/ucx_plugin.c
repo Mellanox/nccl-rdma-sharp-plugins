@@ -14,6 +14,7 @@
 #include "ibvwrap.h"
 #include "nccl.h"
 #include "nccl_net.h"
+#include "p2p_plugin.h"
 #include "param.h"
 #include "socket.h"
 #include "ucp/api/ucp.h"
@@ -57,30 +58,9 @@ ncclResult_t nccl_ucx_devices(int* ndev) {
   return ncclSuccess;
 }
 
-ncclResult_t nccl_ucx_gdr_support(int ibDev) {
-  static int moduleLoaded = -1;
-  if (moduleLoaded == -1) {
-    moduleLoaded = (access("/sys/kernel/mm/memory_peers/nv_mem/version", F_OK) == -1) ? 0 : 1;
-  }
-  if (moduleLoaded == 0) return ncclSystemError;
-  return ncclSuccess;
-}
-
 ncclResult_t nccl_ucx_get_properties(int dev, ncclNetProperties_t* props)
 {
-  props->name         = ncclIbDevs[dev].devName;
-  props->pciPath      = ncclIbDevs[dev].pciPath;
-  props->guid         = ncclIbDevs[dev].guid;
-  props->ptrSupport   = NCCL_PTR_HOST;
-  if (nccl_ucx_gdr_support(dev) != ncclSuccess) {
-    INFO(NCCL_NET,"NET/IB : GPU Direct RDMA Disabled for HCA %d '%s' (no module)", dev, ncclIbDevs[dev].devName);
-  } else {
-    props->ptrSupport |= NCCL_PTR_CUDA;
-  }
-  props->speed        = ncclIbDevs[dev].speed;
-  props->port         = ncclIbDevs[dev].port + ncclIbDevs[dev].realPort;
-  props->maxComms     = ncclIbDevs[dev].maxQp;
-  return ncclSuccess;
+  return nccl_p2p_ib_get_properties(ncclIbDevs, dev, props);
 }
 
 pthread_mutex_t nccl_ucx_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -317,151 +297,10 @@ static ncclResult_t nccl_ucx_add_ep(ucp_worker_h worker, int fd) {
   }
 }
 
-static ncclResult_t nccl_ucx_pci_path(char* devName, char** path, int* realPort) {
-  char devicePath[PATH_MAX];
-  snprintf(devicePath, PATH_MAX, "/sys/class/infiniband/%s/device", devName);
-  char* p = realpath(devicePath, NULL);
-  if (p == NULL) {
-    WARN("Could not find real path of %s", *devicePath);
-  } else {
-    // Merge multi-port NICs into the same PCI device
-    p[strlen(p)-1] = '0';
-    // And keep the real port aside (the ibv port is always 1 on recent cards)
-    *realPort = 0;
-    for (int d=0; d<ncclNIbDevs; d++) {
-      if (strcmp(p, ncclIbDevs[d].pciPath) == 0) (*realPort)++;
-    }
-  }
-  *path = p;
-  return ncclSuccess;
-}
-
-
-static int ibvWidths[] = { 1, 4, 8, 12 };
-static int ibvSpeeds[] = { 2500, 5000, 10000, 10000, 14000, 25000, 50000 };
-static int firstBitSet(int val, int max) {
-  int i = 0;
-  while (i<max && ((val & (1<<i)) == 0)) i++;
-  return i;
-}
-static int ncclIbWidth(int width) {
-  return ibvWidths[firstBitSet(width, sizeof(ibvWidths)/sizeof(int)-1)];
-}
-static int ncclIbSpeed(int speed) {
-  return ibvSpeeds[firstBitSet(speed, sizeof(ibvSpeeds)/sizeof(int)-1)];
-}
-
-uint64_t ncclParamSharpMaxComms();
-
 ncclResult_t nccl_ucx_init(ncclDebugLogger_t logFunction) {
-  struct timeval tval;
-  gettimeofday(&tval, NULL);
-  srand((int) tval.tv_usec);
-
   if (ncclParamUCXDisable()) return ncclInternalError;
 
-  if (ncclNIbDevs == -1) {
-    pthread_mutex_lock(&nccl_ucx_lock);
-    wrap_ibv_fork_init();
-    if (ncclNIbDevs == -1) {
-      ncclNIbDevs = 0;
-      ncclNSharpDevs = 0;
-      if (findInterfaces(if_name, &nccl_ucx_if_addr, MAX_IF_NAME_SIZE, 1) != 1) {
-        WARN("NET/UCX : No IP interface found.");
-        return ncclInternalError;
-      }
-
-      // Detect IB cards
-      int nIbDevs;
-      struct ibv_device** devices;
-
-      // Check if user defined which IB device:port to use
-      char* userIbEnv = getenv("NCCL_IB_HCA");
-      struct netIf userIfs[MAX_IB_DEVS];
-      int searchNot = userIbEnv && userIbEnv[0] == '^';
-      int nUserIfs = parseStringList(userIbEnv, userIfs, MAX_IB_DEVS);
-
-      if (ncclSuccess != wrap_ibv_get_device_list(&devices, &nIbDevs)) return ncclInternalError;
-
-      for (int d=0; d<nIbDevs; d++) {
-        struct ibv_context * context;
-        if (ncclSuccess != wrap_ibv_open_device(&context, devices[d]) || context == NULL) {
-          WARN("NET/UCX : Unable to open device %s", devices[d]->name);
-          continue;
-        }
-        int found = 0;
-        struct ibv_device_attr devAttr;
-        if (ncclSuccess != wrap_ibv_query_device(context, &devAttr)) {
-          WARN("NET/UCX : Unable to query device %s", devices[d]->name);
-          if (ncclSuccess != wrap_ibv_close_device(context)) { return ncclInternalError; }
-          continue;
-        }
-        for (int port = 1; port <= devAttr.phys_port_cnt; port++) {
-          struct ibv_port_attr portAttr;
-          long vendorId, devId;
-          if (ncclSuccess != wrap_ibv_query_port(context, port, &portAttr)) {
-            WARN("NET/UCX : Unable to query port %d", port);
-            continue;
-          }
-          if (portAttr.state != IBV_PORT_ACTIVE) continue;
-          if (portAttr.link_layer != IBV_LINK_LAYER_INFINIBAND
-              && portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
-
-          // check against user specified HCAs/ports
-          if (! (matchIfList(devices[d]->name, port, userIfs, nUserIfs) ^ searchNot)) {
-            continue;
-          }
-          TRACE(NCCL_INIT|NCCL_NET,"NET/UCX: [%d] %s:%d/%s ", d, devices[d]->name, port,
-              portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
-          ncclIbDevs[ncclNIbDevs].device = d;
-          ncclIbDevs[ncclNIbDevs].guid = devAttr.sys_image_guid;
-          ncclIbDevs[ncclNIbDevs].port = port;
-          ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
-          ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portAttr.active_speed) * ncclIbWidth(portAttr.active_width);
-          ncclIbDevs[ncclNIbDevs].context = context;
-          strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
-          NCCLCHECK(nccl_ucx_pci_path(ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort));
-          ncclIbDevs[ncclNIbDevs].maxQp = devAttr.max_qp;
-          readFileNumber(&vendorId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "vendor");
-          readFileNumber(&devId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "device");
-          ncclIbDevs[ncclNIbDevs].isSharpDev = 0;
-          if ((portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) &&
-              (vendorId == 0x15b3) &&           // Mellanox vendor
-              (devId == 4123 || devId == 4124)) //ConnectX-6
-          {
-            ncclIbDevs[ncclNIbDevs].isSharpDev = 1;
-            ncclIbDevs[ncclNIbDevs].maxQp = ncclParamSharpMaxComms();
-            ncclNSharpDevs++;
-          }
-          ncclNIbDevs++;
-          found++;
-        }
-        if (found == 0 && ncclSuccess != wrap_ibv_close_device(context)) { return ncclInternalError; }
-      }
-      if (nIbDevs && (ncclSuccess != wrap_ibv_free_device_list(devices))) { return ncclInternalError; };
-    }
-    if (ncclNIbDevs == 0) {
-      INFO(NCCL_INIT|NCCL_NET, "NET/UCX : No device found.");
-    } else {
-      // sort devices on sharp capable
-      if (ncclNSharpDevs && (ncclNSharpDevs != ncclNIbDevs)) {
-        qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), devCompare);
-      }
-
-      char line[1024];
-      line[0] = '\0';
-      for (int d=0; d<ncclNIbDevs; d++) {
-        snprintf(line+strlen(line), 1023-strlen(line), " [%d]%s:%d/%s%s", d, ncclIbDevs[d].devName,
-            ncclIbDevs[d].port, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE",
-            ncclIbDevs[d].isSharpDev ? "/SHARP" : "");
-      }
-      line[1023] = '\0';
-      char addrline[1024];
-      INFO(NCCL_INIT|NCCL_NET, "NET/UCX : Using%s ; OOB %s:%s", line, if_name, socketToString(&nccl_ucx_if_addr.sa, addrline));
-    }
-    pthread_mutex_unlock(&nccl_ucx_lock);
-  }
-  return ncclSuccess;
+  return nccl_p2p_ib_init(&ncclNIbDevs, ncclIbDevs, if_name, &nccl_ucx_if_addr, NULL, logFunction);
 }
 
 ncclResult_t nccl_ucx_listen(int dev, void *handle, void **listen_comm) {
@@ -553,7 +392,7 @@ ncclResult_t nccl_ucx_accept(void *listen_comm, void **recv_comm) {
   UCXCHECK(ucp_ep_rkey_unpack(r_comm->ep, rkey_buf, &r_comm->rkey));
   NCCLCHECK(socketReceive(r_comm->fd, &r_comm->ctag, sizeof(ucp_tag_t)));
 
-  r_comm->gpuFlush.enabled = (nccl_ucx_gdr_support(l_comm->dev) == 0);  
+  r_comm->gpuFlush.enabled = (nccl_p2p_gdr_support(l_comm->dev) == 0);  
   if (r_comm->gpuFlush.enabled) {
     ucp_address_t *my_addr;
     size_t local_addr_len;

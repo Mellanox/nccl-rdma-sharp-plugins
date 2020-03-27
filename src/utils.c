@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include "p2p_plugin.h"
 #include "utils.h"
 #include "core.h"
 #include <unistd.h>
