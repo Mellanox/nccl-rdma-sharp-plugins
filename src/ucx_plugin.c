@@ -123,7 +123,7 @@ typedef struct ucx_send_comm {
   int             fd;
   int             ready;
   uint32_t        fifo_head;
-  uint32_t        fifo_tail;
+  uint32_t        *fifo_tail;
   ucp_mem_h       fifo_memh;
 } ucx_send_comm_t;
 
@@ -191,6 +191,7 @@ static ncclResult_t ucx_init_context(ucp_context_h *ctx, int dev) {
 
 static ncclResult_t ucx_init_worker(ucp_context_h ctx, ucp_worker_h *worker) {
   ucp_worker_params_t worker_params;
+
   memset(&worker_params, 0, sizeof(worker_params));
   worker_params.field_mask  = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
   worker_params.thread_mode = UCS_THREAD_MODE_SINGLE;
@@ -208,6 +209,10 @@ static ncclResult_t ucx_worker_get_netaddress(ucp_worker_h worker, ucp_address_t
 
   UCXCHECK(ucp_worker_query(worker, &attr));
   *address = malloc(attr.address_length);
+  if (address == NULL) {
+    return ncclSystemError;
+  }
+
   memcpy(*address, attr.address, attr.address_length);
   *address_length = attr.address_length;
   free(attr.address);
@@ -284,17 +289,26 @@ static ncclResult_t nccl_ucx_free_worker(ucp_worker_h worker) {
 }
 
 static ncclResult_t nccl_ucx_add_ep(ucp_worker_h worker, int fd) {
+  ncclResult_t status = ncclSuccess;
   int i;
 
   for(i = 0; i < ncclNIbDevs; i++) {
     if (worker == workers[i].worker) {
       struct ep_list *new_ep = (struct ep_list*)malloc(sizeof(struct ep_list));
+
+      if (new_ep == NULL) {
+        status = ncclSystemError;
+        break;
+      }
+
       new_ep->fd   = fd;
       new_ep->next = workers[i].eps;
       workers[i].eps = new_ep;
       break;
     }
   }
+
+  return status;
 }
 
 ncclResult_t nccl_ucx_init(ncclDebugLogger_t logFunction) {
@@ -322,7 +336,7 @@ ncclResult_t nccl_ucx_listen(int dev, void *handle, void **listen_comm) {
 
 ncclResult_t nccl_ucx_connect(int dev, void *handle, void **send_comm) {
   ucx_listen_handle_t  *recv_handle = (ucx_listen_handle_t*)handle;
-  ucx_send_comm_t      *comm        = (ucx_send_comm_t*)calloc(1, sizeof(*comm));
+  ucx_send_comm_t      *comm;
   ucp_address_t        *my_addr;
   ucp_mem_map_params_t mmap_params;
   size_t               local_addr_len;
@@ -330,6 +344,8 @@ ncclResult_t nccl_ucx_connect(int dev, void *handle, void **send_comm) {
   void                 *rkey_buf;
   uint64_t             tail_adr;
 
+  NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(ucx_send_comm_t)));
+  memset(comm, 0, sizeof(ucx_send_comm_t));
   NCCLCHECK(connectAddress(&comm->fd, &recv_handle->connectAddr));
   NCCLCHECK(ucx_get_ctx_and_worker(dev, &comm->ctx, &comm->worker, &comm->ctag));
   comm->tag              = recv_handle->tag;
@@ -338,7 +354,8 @@ ncclResult_t nccl_ucx_connect(int dev, void *handle, void **send_comm) {
   nccl_ucx_add_ep(comm->worker,comm->fd);
   INFO(NCCL_NET, "Worker address length: %zu", local_addr_len);
 
-  tail_adr = (uint64_t)&comm->fifo_tail;
+  NCCLCHECK(ncclIbMalloc((void**)&comm->fifo_tail, sizeof(uint32_t)));
+  tail_adr = (uint64_t)comm->fifo_tail;
   mmap_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
                            UCP_MEM_MAP_PARAM_FIELD_LENGTH;
   mmap_params.address    = (void*)tail_adr;
@@ -362,9 +379,9 @@ ncclResult_t nccl_ucx_connect(int dev, void *handle, void **send_comm) {
 }
 
 ncclResult_t nccl_ucx_accept(void *listen_comm, void **recv_comm) {
-  ucx_recv_comm_t    *r_comm = (ucx_recv_comm_t *)calloc(1, sizeof(ucx_recv_comm_t));
   ucx_listen_comm_t  *l_comm = (ucx_listen_comm_t *)listen_comm;
   socklen_t          socklen = sizeof(struct sockaddr_in);
+  ucx_recv_comm_t    *r_comm;
   void   *           rkey_buf;
   size_t             rkey_buf_size;
   size_t             peer_addr_len;
@@ -372,18 +389,32 @@ ncclResult_t nccl_ucx_accept(void *listen_comm, void **recv_comm) {
   ucp_ep_params_t    ep_params;
   struct sockaddr_in sockaddr;
 
+  NCCLCHECK(ncclIbMalloc((void**)&r_comm, sizeof(ucx_recv_comm_t)));
+  memset(r_comm, 0, sizeof(ucx_recv_comm_t));
+
   SYSCHECKVAL(accept(l_comm->fd, (struct sockaddr*)&sockaddr, &socklen), "accept", r_comm->fd);
 
   r_comm->ctx    = l_comm->ctx;
   r_comm->worker = l_comm->worker;
   r_comm->tag    = l_comm->tag;
+
   NCCLCHECK(socketReceive(r_comm->fd, &rkey_buf_size, sizeof(size_t)));
+
   rkey_buf = malloc(rkey_buf_size);
+  if (rkey_buf == NULL) {
+    return ncclSystemError;
+  }
+
   NCCLCHECK(socketReceive(r_comm->fd, rkey_buf, rkey_buf_size));
   NCCLCHECK(socketReceive(r_comm->fd, &r_comm->rem_tail_addr, sizeof(uint64_t)));
-
   NCCLCHECK(socketReceive(r_comm->fd, &peer_addr_len, sizeof(size_t)));
+
   peer_addr = malloc(peer_addr_len);
+  if (peer_addr == NULL) {
+    free(rkey_buf);
+    return ncclSystemError;
+  }
+
   NCCLCHECK(socketReceive(r_comm->fd, peer_addr, peer_addr_len));
   ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS; //|
   //                         UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE;
@@ -392,16 +423,18 @@ ncclResult_t nccl_ucx_accept(void *listen_comm, void **recv_comm) {
   UCXCHECK(ucp_ep_rkey_unpack(r_comm->ep, rkey_buf, &r_comm->rkey));
   NCCLCHECK(socketReceive(r_comm->fd, &r_comm->ctag, sizeof(ucp_tag_t)));
 
-  r_comm->gpuFlush.enabled = (nccl_p2p_gdr_support(l_comm->dev) == 0);  
+  r_comm->gpuFlush.enabled = (nccl_p2p_gdr_support(l_comm->dev) == ncclSuccess);  
   if (r_comm->gpuFlush.enabled) {
     ucp_address_t *my_addr;
-    size_t local_addr_len;
+    size_t        local_addr_len;
 
     NCCLCHECK(ucx_worker_get_netaddress(r_comm->worker, &my_addr, &local_addr_len));
     ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
-    ep_params.address = my_addr;
+    ep_params.address    = my_addr;
     UCXCHECK(ucp_ep_create(r_comm->worker, &ep_params, &r_comm->gpuFlush.flush_ep));
+    free(my_addr);
   }
+
   free(peer_addr);
   free(rkey_buf);
   *recv_comm = r_comm;
@@ -468,6 +501,7 @@ ncclResult_t nccl_ucx_close_send(void *send_comm) {
       NCCLCHECK(socketSend(comm->fd, &close, sizeof(int)));
     }
     nccl_ucx_free_worker(comm->worker);
+    free(comm->fifo_tail);
     free(comm);
   }
 
