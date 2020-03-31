@@ -65,17 +65,27 @@ ncclResult_t nccl_ucx_get_properties(int dev, ncclNetProperties_t* props)
 
 pthread_mutex_t nccl_ucx_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/**
+ * Listen handle that is sent from receiver to sender through OOB connection
+ */
 typedef struct ucx_listen_handle {
-  union socketAddress connectAddr;
-  ucp_tag_t           tag;
+  union socketAddress connectAddr; /* reciever socket address */
+  ucp_tag_t           tag;         /* tag that is used to distiguish data that was sent to 
+                                      this reciever. Required when shared worker is used. */
 } ucx_listen_handle_t;
 
+/**
+ * Listen commincator for UCX plugin.
+ */
 typedef struct ucx_listen_comm {
-  int           dev;
-  int           fd;
-  ucp_context_h ctx;
-  ucp_worker_h  worker;
-  ucp_tag_t     tag;
+  int           dev;    /* device number in ncclIbDevs which will
+                         * be used to recieve data */
+  int           fd;     /* Socket fd */
+  ucp_context_h ctx;    /* ucp_context associated with specific device dev */
+  ucp_worker_h  worker; /* ucx_worker created on ctx, worker can be shared between
+                           multiple connections */
+  ucp_tag_t     tag;    /* tag that is used to distiguish data that was sent to 
+                           this reciever. Required when shared worker is used.*/
 } ucx_listen_comm_t;
 
 typedef struct connect_msg {
@@ -93,12 +103,15 @@ struct ep_list {
   struct ep_list *next;
 };
 
+/**
+ * Connection descriptor. Used to store all opened connections.
+ */
 struct nccl_ucx_worker {
-  ucp_context_h  ctx;
-  ucp_worker_h   worker;
-  int            count;
-  struct ep_list *eps;
-  ucp_tag_t      last_tag;
+  ucp_context_h  ctx;      /* ucp_context bounded to specific device */
+  ucp_worker_h   worker;   /* ucp worker associated with ctx */
+  int            count;    /* number of connections that uses this worker */
+  struct ep_list *eps;     /* endpoints that were openede on this worker */
+  ucp_tag_t      last_tag; /* tag that last created connection uses */
 };
 static struct nccl_ucx_worker workers[MAX_IB_DEVS];
 
@@ -108,39 +121,54 @@ typedef struct ucx_gpu_flush {
   ucp_ep_h flush_ep;
 } ucx_gpu_flush_t;
 
+/**
+ * Common data member for ucx_send_comm and ucx_recv_comm.
+ * Used to map/unmap memory in nccl_ucx_regmr/nccl_ucx_deregmr
+ */
 typedef struct ucx_ctx {
   ucp_context_h   ucp_ctx;
   ucx_gpu_flush_t gpuFlush;
 } ucx_ctx_t;
 
+/**
+ * Sender communicator
+ */
 typedef struct ucx_send_comm {
-  ucp_context_h   ctx;
-  ucx_gpu_flush_t gpuFlush;
-  ucp_worker_h    worker;
-  ucp_ep_h        ep;
-  ucp_tag_t       tag;
-  ucp_tag_t       ctag;
-  int             fd;
-  int             ready;
-  uint32_t        fifo_head;
-  uint32_t        *fifo_tail;
-  ucp_mem_h       fifo_memh;
+  ucp_context_h   ctx;        /* ucp_context bounded to specific device */
+  ucx_gpu_flush_t gpuFlush;   /* flushing handle */
+  ucp_worker_h    worker;     /* ucp worker associated with ctx */
+  ucp_ep_h        ep;         /* ucp endpoint created on worker */
+  ucp_tag_t       tag;        /* datapath tag to filter out message that are not
+                                 belong to this connnection */
+  ucp_tag_t       ctag;       /* controlpath tag to filter out message that are not
+                                 belong to this connnection */
+  int             fd;         /* socket fd for OOB connection */
+  int             ready;      /* indicates that send communicator is fully initialized */
+  uint32_t        fifo_head;  /* number of messages that were sent so far */
+  uint32_t        *fifo_tail; /* number of messages for which receive was posted.
+                                 receiver increments this field each time new receve operation posted */
+  ucp_mem_h       fifo_memh;  /* memory handle for fifo_tail*/
 } ucx_send_comm_t;
 
+/**
+ * Receiver communicator
+ */
 typedef struct ucx_recv_comm {
-  ucp_context_h   ctx;
-  ucx_gpu_flush_t gpuFlush;
-  ucp_worker_h    worker;
-  ucp_ep_h        ep;
-  ucp_tag_t       tag;
-  ucp_tag_t       ctag;
-  int             fd;
-  int             ready;
-  uint64_t        rem_tail_addr;
-  uint32_t        tail;
-  ucp_rkey_h      rkey;
-  connect_msg_t   *msg;
-  ucx_request_t   *connect_req;
+  ucp_context_h   ctx;           /* ucp_context bounded to specific device */
+  ucx_gpu_flush_t gpuFlush;      /* flushing handle */
+  ucp_worker_h    worker;        /* ucp worker associated with ctx */
+  ucp_ep_h        ep;            /* ucp endpoint created on worker */
+  ucp_tag_t       tag;           /* datapath tag to filter out message that are not
+                                    belong to this connnection */
+  ucp_tag_t       ctag;          /* controlpath tag to filter out message that are not
+                                    belong to this connnection */
+  int             fd;            /* socket fd for OOB connection */
+  int             ready;         /* indicates that receive communicator is fully initialized */
+  uint64_t        rem_tail_addr; /* address of fifo_tail in ucx_send_comm */
+  uint32_t        tail;          /* number of receives posted so far */
+  ucp_rkey_h      rkey;          /* rkey to put to rem_tail_addr */
+  connect_msg_t   *msg;          /* message to establish reverse connection */
+  ucx_request_t   *connect_req;  /* msg request */
 } ucx_recv_comm_t;
 
 static void request_init(void *request) {
@@ -417,8 +445,7 @@ ncclResult_t nccl_ucx_accept(void *listen_comm, void **recv_comm) {
 
   NCCLCHECK(socketReceive(r_comm->fd, peer_addr, peer_addr_len));
   ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS; //|
-  //                         UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE;
-  ep_params.address = peer_addr;
+  ep_params.address    = peer_addr;
   UCXCHECK(ucp_ep_create(r_comm->worker, &ep_params, &r_comm->ep));
   UCXCHECK(ucp_ep_rkey_unpack(r_comm->ep, rkey_buf, &r_comm->rkey));
   NCCLCHECK(socketReceive(r_comm->fd, &r_comm->ctag, sizeof(ucp_tag_t)));

@@ -4,7 +4,6 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include "p2p_plugin.h"
 #include "utils.h"
 #include "core.h"
 #include <unistd.h>
@@ -139,14 +138,4 @@ int readFileNumber(long *value, const char *filename_fmt, ...)
 
   *value = n;
   return 0;
-}
-
-int devCompare(const void *a, const void *b)
-{
-  const struct ncclIbDev *d1 = (const struct ncclIbDev *)a;
-  const struct ncclIbDev *d2 = (const struct ncclIbDev *)b;
-
-  if (d1->isSharpDev == d2->isSharpDev) { return 0; }
-  else if (d1->isSharpDev > d2->isSharpDev) { return -1; }
-  else { return 1; }
 }

@@ -110,6 +110,16 @@ static void* ncclIbAsyncThreadMain(void* args) {
   return NULL;
 }
 
+int devSharpCompare(const void *a, const void *b)
+{
+  const struct ncclIbDev *d1 = (const struct ncclIbDev *)a;
+  const struct ncclIbDev *d2 = (const struct ncclIbDev *)b;
+
+  if (d1->isSharpDev == d2->isSharpDev) { return 0; }
+  else if (d1->isSharpDev > d2->isSharpDev) { return -1; }
+  else { return 1; }
+}
+
 ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *ncclIbIfName, union socketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction)
 {
   int ncclNIbDevs = *num_devs;
@@ -203,7 +213,7 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
     } else {
       // sort devices on sharp capable
       if (ncclNSharpDevs && (ncclNSharpDevs != ncclNIbDevs)) {
-        qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), devCompare);
+        qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), devSharpCompare);
       }
 
       char line[1024];
