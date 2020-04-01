@@ -16,6 +16,7 @@
 
 #include "nccl.h"
 #include "nccl_net.h"
+#include "p2p_plugin.h"
 #include "core.h"
 #include "socket.h"
 #include "utils.h"
@@ -26,30 +27,10 @@
 
 #define USE_RDMA_WRITE 1
 #define USE_RDMA_SEND_INLINE 0
-#define IB_DEVICE_SYSFS_FMT "/sys/class/infiniband/%s/device/%s"
 static char ncclIbIfName[MAX_IF_NAME_SIZE];
 static union socketAddress ncclIbIfAddr;
 static int ncclNIbDevs = -1;
 extern int ncclNSharpDevs;
-struct ncclIbDev {
-  int device;
-  uint64_t guid;
-  uint8_t port;
-  uint8_t link;
-  uint8_t isSharpDev;
-  int speed;
-  struct ibv_context* context;
-  char devName[MAXNAMESIZE];
-  char* pciPath;
-  int realPort;
-  int maxQp;
-};
-
-#define MAX_IB_PORT 15
-struct userIbDev {
-  char devName[MAXNAMESIZE];
-  uint16_t port_en;
-};
 
 struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
 struct userIbDev userIbDevs[MAX_IB_DEVS];
@@ -61,7 +42,6 @@ NCCL_PARAM(IbRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbSl, "IB_SL", 0);
 NCCL_PARAM(IbTc, "IB_TC", 0);
 NCCL_PARAM(IbPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 0);
-NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
 
 pthread_t ncclIbAsyncThread;
 static void* ncclIbAsyncThreadMain(void* args) {
@@ -80,167 +60,16 @@ static void* ncclIbAsyncThreadMain(void* args) {
 
 NCCL_PARAM(IbDisable, "IBEXT_DISABLE", 0);
 
-static ncclResult_t ncclIbGetPciPath(char* devName, char** path, int* realPort) {
-  char devicePath[PATH_MAX];
-  snprintf(devicePath, PATH_MAX, "/sys/class/infiniband/%s/device", devName);
-  char* p = realpath(devicePath, NULL);
-  if (p == NULL) {
-    WARN("Could not find real path of %s", *devicePath);
-  } else {
-    // Merge multi-port NICs into the same PCI device
-    p[strlen(p)-1] = '0';
-    // And keep the real port aside (the ibv port is always 1 on recent cards)
-    *realPort = 0;
-    for (int d=0; d<ncclNIbDevs; d++) {
-      if (strcmp(p, ncclIbDevs[d].pciPath) == 0) (*realPort)++;
-    }
-  }
-  *path = p;
-  return ncclSuccess;
-}
-
-static int ibvWidths[] = { 1, 4, 8, 12 };
-static int ibvSpeeds[] = { 2500, 5000, 10000, 10000, 14000, 25000, 50000 };
-static int firstBitSet(int val, int max) {
-  int i = 0;
-  while (i<max && ((val & (1<<i)) == 0)) i++;
-  return i;
-}
-static int ncclIbWidth(int width) {
-  return ibvWidths[firstBitSet(width, sizeof(ibvWidths)/sizeof(int)-1)];
-}
-static int ncclIbSpeed(int speed) {
-  return ibvSpeeds[firstBitSet(speed, sizeof(ibvSpeeds)/sizeof(int)-1)];
-}
-
 extern ncclDebugLogger_t pluginLogFunction;
 
-int devCompare(const void *a, const void *b) {
-  const struct ncclIbDev *d1 = (const struct ncclIbDev *)a;
-  const struct ncclIbDev *d2 = (const struct ncclIbDev *)b;
-
-  if (d1->isSharpDev == d2->isSharpDev) { return 0; }
-  else if (d1->isSharpDev > d2->isSharpDev) { return -1; }
-  else { return 1; }
-}
-
 ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
-  struct timeval tval;
-  gettimeofday(&tval, NULL);
-  srand((int) tval.tv_usec);
-
-  pluginLogFunction = logFunction;
-
   if (ncclParamIbDisable()) return ncclInternalError;
-
   if (ncclNIbDevs == -1) {
-    pthread_mutex_lock(&ncclIbLock);
-    wrap_ibv_fork_init();
-
     if (ncclParamIbPciRelaxedOrdering() && !IBV_ACCESS_RELAXED_ORDERING) {
       WARN("NET/IB: PCI relaxed order memory access requested but not supported");
     }
-
-    if (ncclNIbDevs == -1) {
-      ncclNIbDevs = 0;
-      ncclNSharpDevs = 0;
-      if (findInterfaces(ncclIbIfName, &ncclIbIfAddr, MAX_IF_NAME_SIZE, 1) != 1) {
-        WARN("NET/IB : No IP interface found.");
-        return ncclInternalError;
-      }
-
-      // Detect IB cards
-      int nIbDevs;
-      struct ibv_device** devices;
-
-      // Check if user defined which IB device:port to use
-      char* userIbEnv = getenv("NCCL_IB_HCA");
-      struct netIf userIfs[MAX_IB_DEVS];
-      int searchNot = userIbEnv && userIbEnv[0] == '^';
-      int nUserIfs = parseStringList(userIbEnv, userIfs, MAX_IB_DEVS);
-
-      if (ncclSuccess != wrap_ibv_get_device_list(&devices, &nIbDevs)) return ncclInternalError;
-
-      for (int d=0; d<nIbDevs; d++) {
-        struct ibv_context * context;
-        if (ncclSuccess != wrap_ibv_open_device(&context, devices[d]) || context == NULL) {
-          WARN("NET/IB : Unable to open device %s", devices[d]->name);
-          continue;
-        }
-        int found = 0;
-        struct ibv_device_attr devAttr;
-        if (ncclSuccess != wrap_ibv_query_device(context, &devAttr)) {
-          WARN("NET/IB : Unable to query device %s", devices[d]->name);
-          if (ncclSuccess != wrap_ibv_close_device(context)) { return ncclInternalError; }
-          continue;
-        }
-        for (int port = 1; port <= devAttr.phys_port_cnt; port++) {
-          struct ibv_port_attr portAttr;
-          long vendorId, devId;
-          if (ncclSuccess != wrap_ibv_query_port(context, port, &portAttr)) {
-            WARN("NET/IB : Unable to query port %d", port);
-            continue;
-          }
-          if (portAttr.state != IBV_PORT_ACTIVE) continue;
-          if (portAttr.link_layer != IBV_LINK_LAYER_INFINIBAND
-              && portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
-
-          // check against user specified HCAs/ports
-          if (! (matchIfList(devices[d]->name, port, userIfs, nUserIfs) ^ searchNot)) {
-            continue;
-          }
-          TRACE(NCCL_INIT|NCCL_NET,"NET/IB: [%d] %s:%d/%s ", d, devices[d]->name, port,
-              portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
-          ncclIbDevs[ncclNIbDevs].device = d;
-          ncclIbDevs[ncclNIbDevs].guid = devAttr.sys_image_guid;
-          ncclIbDevs[ncclNIbDevs].port = port;
-          ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
-          ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portAttr.active_speed) * ncclIbWidth(portAttr.active_width);
-          ncclIbDevs[ncclNIbDevs].context = context;
-          strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
-          NCCLCHECK(ncclIbGetPciPath(ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort));
-          ncclIbDevs[ncclNIbDevs].maxQp = devAttr.max_qp;
-          readFileNumber(&vendorId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "vendor");
-          readFileNumber(&devId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "device");
-          ncclIbDevs[ncclNIbDevs].isSharpDev = 0;
-          if ((portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) &&
-              (vendorId == 0x15b3) &&           // Mellanox vendor
-              (devId == 4123 || devId == 4124)) //ConnectX-6
-          {
-            ncclIbDevs[ncclNIbDevs].isSharpDev = 1;
-            ncclIbDevs[ncclNIbDevs].maxQp = ncclParamSharpMaxComms();
-            ncclNSharpDevs++;
-          }
-          ncclNIbDevs++;
-          found++;
-          pthread_create(&ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, context);
-        }
-        if (found == 0 && ncclSuccess != wrap_ibv_close_device(context)) { return ncclInternalError; }
-      }
-      if (nIbDevs && (ncclSuccess != wrap_ibv_free_device_list(devices))) { return ncclInternalError; };
-    }
-    if (ncclNIbDevs == 0) {
-      INFO(NCCL_INIT|NCCL_NET, "NET/IB : No device found.");
-    } else {
-      // sort devices on sharp capable
-      if (ncclNSharpDevs && (ncclNSharpDevs != ncclNIbDevs)) {
-        qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), devCompare);
-      }
-
-      char line[1024];
-      line[0] = '\0';
-      for (int d=0; d<ncclNIbDevs; d++) {
-        snprintf(line+strlen(line), 1023-strlen(line), " [%d]%s:%d/%s%s", d, ncclIbDevs[d].devName,
-            ncclIbDevs[d].port, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE",
-            ncclIbDevs[d].isSharpDev ? "/SHARP" : "");
-      }
-      line[1023] = '\0';
-      char addrline[1024];
-      INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s ; OOB %s:%s", line, ncclIbIfName, socketToString(&ncclIbIfAddr.sa, addrline));
-    }
-    pthread_mutex_unlock(&ncclIbLock);
   }
-  return ncclSuccess;
+  return nccl_p2p_ib_init(&ncclNIbDevs, ncclIbDevs, ncclIbIfName, &ncclIbIfAddr, &ncclIbAsyncThread, logFunction);
 }
 
 ncclResult_t ncclIbDevices(int* ndev) {
@@ -248,34 +77,9 @@ ncclResult_t ncclIbDevices(int* ndev) {
   return ncclSuccess;
 }
 
-// Detect whether GDR can work on a given NIC with the current CUDA device
-// Returns :
-// ncclSuccess : GDR works
-// ncclSystemError : no module or module loaded but not supported by GPU
-ncclResult_t ncclIbGdrSupport(int ibDev) {
-  static int moduleLoaded = -1;
-  if (moduleLoaded == -1) {
-    moduleLoaded = (access("/sys/kernel/mm/memory_peers/nv_mem/version", F_OK) == -1) ? 0 : 1;
-  }
-  if (moduleLoaded == 0) return ncclSystemError;
-  return ncclSuccess;
-}
-
 ncclResult_t ncclIbGetProperties(int dev, ncclNetProperties_t* props)
 {
-  props->name = ncclIbDevs[dev].devName;
-  props->pciPath = ncclIbDevs[dev].pciPath;
-  props->guid = ncclIbDevs[dev].guid;
-  props->ptrSupport = NCCL_PTR_HOST;
-  if (ncclIbGdrSupport(dev) != ncclSuccess) {
-    INFO(NCCL_NET,"NET/IB : GPU Direct RDMA Disabled for HCA %d '%s' (no module)", dev, ncclIbDevs[dev].devName);
-  } else {
-    props->ptrSupport |= NCCL_PTR_CUDA;
-  }
-  props->speed = ncclIbDevs[dev].speed;
-  props->port = ncclIbDevs[dev].port + ncclIbDevs[dev].realPort;
-  props->maxComms = ncclIbDevs[dev].maxQp;
-  return ncclSuccess;
+  return nccl_p2p_ib_get_properties(ncclIbDevs, dev, props);
 }
 
 static ncclResult_t GetSocketAddr(union socketAddress* addr) {
@@ -548,7 +352,7 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm) {
 #endif
 
   // Allocate Flush dummy buffer for GPU Direct RDMA
-  rComm->gpuFlush.enabled = (ncclIbGdrSupport(lComm->dev) == 0) && (ncclParamIbGdrFlushDisable() == 0) ? 1 : 0;
+  rComm->gpuFlush.enabled = (nccl_p2p_gdr_support(lComm->dev) == 0) && (ncclParamIbGdrFlushDisable() == 0) ? 1 : 0;
   if (rComm->gpuFlush.enabled) {
     NCCLCHECK(wrap_ibv_reg_mr(&rComm->gpuFlush.hostMr, rComm->verbs.pd, &rComm->gpuFlush.hostMem, sizeof(int), IBV_ACCESS_LOCAL_WRITE));
     rComm->gpuFlush.sge.addr = (uint64_t)&rComm->gpuFlush.hostMem;
