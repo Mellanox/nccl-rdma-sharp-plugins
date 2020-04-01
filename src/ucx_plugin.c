@@ -110,7 +110,7 @@ struct nccl_ucx_worker {
   ucp_context_h  ctx;      /* ucp_context bounded to specific device */
   ucp_worker_h   worker;   /* ucp worker associated with ctx */
   int            count;    /* number of connections that uses this worker */
-  struct ep_list *eps;     /* endpoints that were openede on this worker */
+  struct ep_list *eps;     /* oob conection to all endpoints that were opened on this worker */
   ucp_tag_t      last_tag; /* tag that last created connection uses */
 };
 static struct nccl_ucx_worker workers[MAX_IB_DEVS];
