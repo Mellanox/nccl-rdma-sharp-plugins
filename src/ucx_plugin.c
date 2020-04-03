@@ -471,17 +471,17 @@ ncclResult_t nccl_ucx_accept(void *listen_comm, void **recv_comm) {
 
 #define REG_ALIGN (4096)
 ncclResult_t nccl_ucx_regmr(void* comm, void* data, int size, int type, void** mhandle) {
+  ucx_ctx_t *ctx = (ucx_ctx_t*)comm;
+  uint64_t  addr = (uint64_t)  data;
   ucp_mem_map_params_t mmap_params;
-  ucx_ctx_t            *ctx = (ucx_ctx_t*)comm;
-  uint64_t             addr = (uint64_t)data;
-  ucx_mhandle_t *mh;
-  uint64_t      reg_addr, reg_size;
-  size_t        rkey_buf_size;
-  void          *rkey_buf;
+  ucx_mhandle_t        *mh;
+  uint64_t             reg_addr, reg_size;
+  size_t               rkey_buf_size;
+  void                 *rkey_buf;
   
   reg_addr = addr & (~(REG_ALIGN - 1));
   reg_size = addr + size - reg_addr;
-  reg_size = ((reg_size + REG_ALIGN - 1) / REG_ALIGN ) * REG_ALIGN;
+  reg_size = ROUNDUP(reg_size, REG_ALIGN);
 
   mmap_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
                            UCP_MEM_MAP_PARAM_FIELD_LENGTH; 
