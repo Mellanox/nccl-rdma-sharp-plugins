@@ -401,7 +401,7 @@ ncclResult_t nccl_ucx_connect(int dev, void *handle, void **send_comm) {
   *send_comm = comm;
 
   free(my_addr);
-  free(rkey_buf);
+  ucp_rkey_buffer_release(rkey_buf);
 
   return ncclSuccess;
 }
@@ -469,14 +469,54 @@ ncclResult_t nccl_ucx_accept(void *listen_comm, void **recv_comm) {
   return ncclSuccess;
 }
 
+#define REG_ALIGN (4096)
 ncclResult_t nccl_ucx_regmr(void* comm, void* data, int size, int type, void** mhandle) {
-  WARN("NET/UCX: not implemented");
-  return ncclInternalError;
+  ucx_ctx_t *ctx = (ucx_ctx_t*)comm;
+  uint64_t  addr = (uint64_t)  data;
+  ucp_mem_map_params_t mmap_params;
+  ucx_mhandle_t        *mh;
+  uint64_t             reg_addr, reg_size;
+  size_t               rkey_buf_size;
+  void                 *rkey_buf;
+  
+  reg_addr = addr & (~(REG_ALIGN - 1));
+  reg_size = addr + size - reg_addr;
+  reg_size = ROUNDUP(reg_size, REG_ALIGN);
+
+  mmap_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
+                           UCP_MEM_MAP_PARAM_FIELD_LENGTH; 
+  mmap_params.address    = (void*)reg_addr;
+  mmap_params.length     = reg_size;
+  
+  mh = (ucx_mhandle_t*)malloc(sizeof(ucx_mhandle_t));
+  if (mh == NULL) {
+    return ncclSystemError;
+  }
+
+  UCXCHECK(ucp_mem_map(ctx->ucp_ctx, &mmap_params, &mh->ucp_memh));
+
+  if (ctx->gpuFlush.enabled) {
+    UCXCHECK(ucp_rkey_pack(ctx->ucp_ctx, mh->ucp_memh, &rkey_buf, &rkey_buf_size));
+    UCXCHECK(ucp_ep_rkey_unpack(ctx->gpuFlush.flush_ep, rkey_buf, &mh->rkey));
+    ucp_rkey_buffer_release(rkey_buf);
+  }
+  
+  *mhandle = mh;
+  return ncclSuccess;
 }
 
 ncclResult_t nccl_ucx_deregmr(void* comm, void* mhandle) {
-  WARN("NET/UCX: not implemented");
-  return ncclInternalError;
+  ucx_ctx_t     *ctx = (ucx_ctx_t*)comm;
+  ucx_mhandle_t *mh  = (ucx_mhandle_t*)mhandle;
+
+  if (ctx->gpuFlush.enabled) {
+      ucp_rkey_destroy(mh->rkey);
+  }
+
+  ucp_mem_unmap(ctx->ucp_ctx, mh->ucp_memh);
+  free(mhandle);
+
+  return ncclSuccess;
 }
 
 ncclResult_t nccl_ucx_isend(void *send_comm, void *data, int size, void *mhandle, void **request) {
