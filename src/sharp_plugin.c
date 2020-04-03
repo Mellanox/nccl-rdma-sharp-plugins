@@ -95,8 +95,12 @@ int ncclSharpAllGather(void *context, void *buf, int len) {
   struct ncclSharpCollComm* cComm = (struct ncclSharpCollComm*)context;
 
   void* rMhandle, *sMhandle;
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->recvComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &rMhandle));
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->sendComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &sMhandle));
+
+  if (strcmp(NCCL_PLUGIN_SYMBOL.name, "UCX") != 0) {
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->recvComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &rMhandle));
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->sendComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &sMhandle));
+  }
+
   int speer = cComm->rank;
   for (int i=0; i<cComm->nranks-1; i++) {
     void* srequest = NULL, *rrequest = NULL;
@@ -114,8 +118,11 @@ int ncclSharpAllGather(void *context, void *buf, int len) {
     }
     speer = rpeer;
   }
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.deregMr(cComm->recvComm, rMhandle));
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.deregMr(cComm->sendComm, sMhandle));
+  if (strcmp(NCCL_PLUGIN_SYMBOL.name, "UCX") != 0) {
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.deregMr(cComm->recvComm, rMhandle));
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.deregMr(cComm->sendComm, sMhandle));
+  }
+
   return 0;
 }
 
