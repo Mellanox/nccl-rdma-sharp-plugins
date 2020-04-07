@@ -167,11 +167,6 @@ do
                     # TODO change to SHARP_COLL_SAT_THRESHOLD=1 (32 - W/A for SHARP issue)
                     MPIRUN_OPTIONS_SHARP="\
                         -x SHARP_COLL_LOG_LEVEL=3 \
-                        -x ENABLE_SHARP_COLL=1 \
-                        -x SHARP_COLL_OSTS_PER_GROUP=64 \
-                        -x SHARP_COLL_ENABLE_MCAST_TARGET=0 \
-                        -x SHARP_COLL_JOB_QUOTA_PAYLOAD_PER_OST=1024 \
-                        -x SHARP_COLL_JOB_QUOTA_OSTS=256 \
                         -x SHARP_COLL_ENABLE_SAT=${ENABLE_SAT} \
                         -x SHARP_COLL_SAT_THRESHOLD=32 \
                         "

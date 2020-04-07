@@ -45,6 +45,11 @@ static const ucp_tag_t tag_mask = 0xFFFFFFFFFFFFFFFF;
 static int ncclNIbDevs = -1;
 extern int ncclNSharpDevs;
 
+enum {
+  REQUEST_COMPLETED_ZERO_LENGTGH    = 1,
+  REQUEST_COMPLETED_NON_ZERO_LENGTH = 2
+};
+
 typedef struct ucx_mhandle {
   ucp_mem_h  ucp_memh;
   ucp_rkey_h rkey;
@@ -538,8 +543,7 @@ ncclResult_t ucx_send_check(ucx_send_comm_t *comm) {
 
   if (UCS_PTR_IS_ERR(req)) {
     WARN("Unable to receive connect msg (%s)", ucs_status_string(UCS_PTR_STATUS(req)));
-  }
-  else {
+  } else {
     while (req->completed == 0) {
       ucp_worker_progress(comm->worker);
     }
@@ -579,8 +583,7 @@ ncclResult_t ucx_recv_check(ucx_recv_comm_t *comm) {
     }
 
     free(my_addr);
-  }
-  else{
+  } else {
     if (comm->connect_req->completed == 1) {
       comm->ready = 1;
       comm->connect_req->completed = 0;
@@ -602,12 +605,11 @@ ncclResult_t nccl_ucx_isend(void *send_comm, void *data, int size, void *mhandle
   ucx_request_t     *req;
 
   if (comm->ready == 0) {
-    ucx_send_check(comm);
-  }
-
-  if (comm->ready == 0) {
-    *request = NULL;
-    return ncclSuccess;
+    NCCLCHECK(ucx_send_check(comm));
+    if (comm->ready == 0) {
+      *request = NULL;
+      return ncclSuccess;
+    }
   }
 
   if (*head == *tail) {
@@ -638,13 +640,12 @@ ncclResult_t nccl_ucx_irecv(void *recv_comm, void *data, int size, void *mhandle
   ucx_request_t     *req;
 
   if (comm->ready == 0) {
-    ucx_recv_check(comm);
-  }
-  
-  if (comm->ready == 0) {
-    *request = NULL;
-    return ncclSuccess;
-  }
+    NCCLCHECK(ucx_recv_check(comm));
+    if (comm->ready == 0) {
+      *request = NULL;
+      return ncclSuccess;
+    }
+  }  
 
   req = ucp_tag_recv_nb(comm->worker, data, size, ucp_dt_make_contig(1), comm->tag, tag_mask, recv_handler);
 
@@ -660,7 +661,7 @@ ncclResult_t nccl_ucx_irecv(void *recv_comm, void *data, int size, void *mhandle
 
   comm->tail++;
   ucp_put_nbi(comm->ep, &comm->tail, sizeof(uint32_t), comm->rem_tail_addr, comm->rkey);
-  *request = req ? req : (size ? 1: 2);
+  *request = req ? req : (size ? REQUEST_COMPLETED_ZERO_LENGTGH: REQUEST_COMPLETED_NON_ZERO_LENGTH);
 
   return ncclSuccess;
 }
@@ -687,7 +688,8 @@ ncclResult_t nccl_ucx_test(void *request, int *done, int *size) {
  */
 
   *done = 0;
-  if ((uint64_t)request == 1ul || (uint64_t)request == 2ul) {
+  if (((uint64_t)request == REQUEST_COMPLETED_ZERO_LENGTGH) ||
+      ((uint64_t)request == REQUEST_COMPLETED_NON_ZERO_LENGTH)) {
     *done = 1;
     if (size) {
       *size = -1 + (uint64_t)request;
