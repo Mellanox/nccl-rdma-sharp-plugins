@@ -45,6 +45,18 @@ static const ucp_tag_t tag_mask = 0xFFFFFFFFFFFFFFFF;
 static int ncclNIbDevs = -1;
 extern int ncclNSharpDevs;
 
+/*
+ * If request == REQUEST_COMPLETED_ZERO_LENGTGH:
+ *  ucp_send or ucp_recv was completed immediately and worker progress is not needed
+ *  message size == 0 and gpu flush is not needed
+ * 
+ * If request == REQUEST_COMPLETED_NON_ZERO_LENGTH:
+ *  ucp_send or ucp_recv was completed immediately and worker progres is not needed
+ *  message size > 0 and gpu flush is needed
+ * 
+ * If request != REQUEST_COMPLETED_ZERO_LENGTGH and request != REQUEST_COMPLETED_NON_ZERO_LENGTH:
+ *  normal ucp request.
+ */
 enum {
   REQUEST_COMPLETED_ZERO_LENGTGH    = 1,
   REQUEST_COMPLETED_NON_ZERO_LENGTH = 2
@@ -618,19 +630,17 @@ ncclResult_t nccl_ucx_isend(void *send_comm, void *data, int size, void *mhandle
   }
 
   req = ucp_tag_send_nb(comm->ep, data, size, ucp_dt_make_contig(1), comm->tag, send_handler);
-
   if (UCS_PTR_IS_ERR(req)) {
     WARN("ucx_isend: unable to send message (%s)\n", ucs_status_string(UCS_PTR_STATUS(req)));
     return ncclSystemError;
-  }
-  else if (req != NULL) {
+  } else if (req != NULL) {
     ucp_worker_progress(comm->worker);
     req->worker = comm->worker;
     req->size = size;
   }
 
   comm->fifo_head++;
-  *request = req ? req : (size ? 1: 2);
+  *request = req ? req : (size ? REQUEST_COMPLETED_ZERO_LENGTGH: REQUEST_COMPLETED_NON_ZERO_LENGTH);
 
   return ncclSuccess;
 }
@@ -648,12 +658,10 @@ ncclResult_t nccl_ucx_irecv(void *recv_comm, void *data, int size, void *mhandle
   }  
 
   req = ucp_tag_recv_nb(comm->worker, data, size, ucp_dt_make_contig(1), comm->tag, tag_mask, recv_handler);
-
   if (UCS_PTR_IS_ERR(req)) {
     WARN("ucx_irecv: unable to receive message (%s)", ucs_status_string(UCS_PTR_STATUS(req)));
     return ncclSystemError;
-  }
-  else if (req != NULL) {
+  } else if (req != NULL) {
     ucp_worker_progress(comm->worker);
     req->worker = comm->worker;
     req->size = size;
@@ -673,19 +681,6 @@ ncclResult_t nccl_ucx_flush(void* recv_comm, void* data, int size, void* mhandle
 
 ncclResult_t nccl_ucx_test(void *request, int *done, int *size) {
   ucx_request_t *req = (ucx_request_t *)request;
-
-/*
- * If request == 1:
- *  ucp_send or ucp_recv was completed immediately and worker progress is not needed
- *  message size == 0 and gpu flush is not needed
- * 
- * If request == 2:
- *  ucp_send or ucp_recv was completed immediately and worker progres is not needed
- *  message size > 0 and gpu flush is needed
- * 
- * If request != 1 and request != 2:
- *  normal ucp request.
- */
 
   *done = 0;
   if (((uint64_t)request == REQUEST_COMPLETED_ZERO_LENGTGH) ||
