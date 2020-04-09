@@ -14,6 +14,7 @@
 #include "core.h"
 #include "nccl.h"
 #include "nccl_net.h"
+#include "p2p_plugin.h"
 #include "param.h"
 #include "sharp/api/version.h"
 #include "sharp/api/sharp_coll.h"
@@ -93,10 +94,15 @@ static __inline__ enum sharp_reduce_op opConvert(ncclRedOp_t op) {
 
 int ncclSharpAllGather(void *context, void *buf, int len) {
   struct ncclSharpCollComm* cComm = (struct ncclSharpCollComm*)context;
-
+  nccl_p2p_plugin_t p2p_plugin;
   void* rMhandle, *sMhandle;
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->recvComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &rMhandle));
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->sendComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &sMhandle));
+
+  p2p_plugin = nccl_p2p_get_plugin_type();
+  if (p2p_plugin != NCCL_P2P_UCX) {
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->recvComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &rMhandle));
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->sendComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &sMhandle));
+  }
+
   int speer = cComm->rank;
   for (int i=0; i<cComm->nranks-1; i++) {
     void* srequest = NULL, *rrequest = NULL;
@@ -114,8 +120,11 @@ int ncclSharpAllGather(void *context, void *buf, int len) {
     }
     speer = rpeer;
   }
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.deregMr(cComm->recvComm, rMhandle));
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.deregMr(cComm->sendComm, sMhandle));
+  if (p2p_plugin != NCCL_P2P_UCX) {
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.deregMr(cComm->recvComm, rMhandle));
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.deregMr(cComm->sendComm, sMhandle));
+  }
+
   return 0;
 }
 

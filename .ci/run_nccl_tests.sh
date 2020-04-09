@@ -119,119 +119,122 @@ trim_multiple_spaces() {
 ###############################################################################
 
 i=1
-
 #===================
-# NCCL_PROTO
+# NCCL_PLUGIN_P2P
 #===================
-for NCCL_PROTO in Simple LL DEFAULT
+for P2P_LAYER in ucx ib
 do
-    if [ "${NCCL_PROTO}" = "DEFAULT" ]
-    then
-        MPIRUN_OPTIONS_NCCL_PROTO=""
-    else
-        MPIRUN_OPTIONS_NCCL_PROTO="-x NCCL_PROTO=${NCCL_PROTO}"
-    fi
+    MPIRUN_OPTIONS_PLUGIN_P2P_LAYER="-x NCCL_PLUGIN_P2P=${P2P_LAYER}"
 
     #===================
-    # NCCL_ALGO
+    # NCCL_PROTO
     #===================
-    for NCCL_ALGO in CollNet Tree Ring DEFAULT
+    for NCCL_PROTO in Simple LL DEFAULT
     do
-        if [ "${NCCL_ALGO}" = "DEFAULT" ]
+        if [ "${NCCL_PROTO}" = "DEFAULT" ]
         then
-            MPIRUN_OPTIONS_NCCL_ALGO=""
+            MPIRUN_OPTIONS_NCCL_PROTO=""
         else
-            MPIRUN_OPTIONS_NCCL_ALGO="-x NCCL_ALGO=${NCCL_ALGO}"
-        fi
-
-        if [ "${NCCL_ALGO}" = "CollNet" ]
-        then
-            MPIRUN_OPTIONS_NCCL_ALGO="-x NCCL_COLLNET_ENABLE=1 ${MPIRUN_OPTIONS_NCCL_ALGO}"
+            MPIRUN_OPTIONS_NCCL_PROTO="-x NCCL_PROTO=${NCCL_PROTO}"
         fi
 
         #===================
-        # SHARP_ENABLE
+        # NCCL_ALGO
         #===================
-        for SHARP_ENABLE in 0 1
+        for NCCL_ALGO in CollNet Tree Ring DEFAULT
         do
-            if [ "${SHARP_ENABLE}" = "0" ]
+            if [ "${NCCL_ALGO}" = "DEFAULT" ]
             then
-                MPIRUN_OPTIONS_SHARP=""
+                MPIRUN_OPTIONS_NCCL_ALGO=""
             else
-                # TODO change to SHARP_COLL_SAT_THRESHOLD=1 (32 - W/A for SHARP issue)
-                MPIRUN_OPTIONS_SHARP="\
-                    -x SHARP_COLL_LOG_LEVEL=3 \
-                    -x ENABLE_SHARP_COLL=1 \
-                    -x SHARP_COLL_OSTS_PER_GROUP=64 \
-                    -x SHARP_COLL_ENABLE_MCAST_TARGET=0 \
-                    -x SHARP_COLL_JOB_QUOTA_PAYLOAD_PER_OST=1024 \
-                    -x SHARP_COLL_JOB_QUOTA_OSTS=256 \
-                    -x SHARP_COLL_ENABLE_SAT=${ENABLE_SAT} \
-                    -x SHARP_COLL_SAT_THRESHOLD=32 \
-                    "
+                MPIRUN_OPTIONS_NCCL_ALGO="-x NCCL_ALGO=${NCCL_ALGO}"
+            fi
+
+            if [ "${NCCL_ALGO}" = "CollNet" ]
+            then
+                MPIRUN_OPTIONS_NCCL_ALGO="-x NCCL_COLLNET_ENABLE=1 ${MPIRUN_OPTIONS_NCCL_ALGO}"
             fi
 
             #===================
-            # NCCL_NET_GDR_LEVEL
+            # SHARP_ENABLE
             #===================
-            # for NCCL_NET_GDR_LEVEL in 0 1 2 3 4 5 DEFAULT
-            for NCCL_NET_GDR_LEVEL in DEFAULT
+            for SHARP_ENABLE in 0 1
             do
-                if [ "${NCCL_NET_GDR_LEVEL}" = "DEFAULT" ]
+                if [ "${SHARP_ENABLE}" = "0" ]
                 then
-                    MPIRUN_OPTIONS_GDR_LEVEL=""
+                    MPIRUN_OPTIONS_SHARP=""
                 else
-                    MPIRUN_OPTIONS_GDR_LEVEL="-x NCCL_NET_GDR_LEVEL=${NCCL_NET_GDR_LEVEL}"
+                    # TODO change to SHARP_COLL_SAT_THRESHOLD=1 (32 - W/A for SHARP issue)
+                    MPIRUN_OPTIONS_SHARP="\
+                        -x SHARP_COLL_LOG_LEVEL=3 \
+                        -x SHARP_COLL_ENABLE_SAT=${ENABLE_SAT} \
+                        -x SHARP_COLL_SAT_THRESHOLD=32 \
+                        "
                 fi
 
                 #===================
-                # NCCL_NET_GDR_READ
+                # NCCL_NET_GDR_LEVEL
                 #===================
-                # for NCCL_NET_GDR_READ in 0 1 DEFAULT
-                for NCCL_NET_GDR_READ in DEFAULT
+                # for NCCL_NET_GDR_LEVEL in 0 1 2 3 4 5 DEFAULT
+                for NCCL_NET_GDR_LEVEL in DEFAULT
                 do
-                    if [ "${NCCL_NET_GDR_READ}" = "DEFAULT" ]
+                    if [ "${NCCL_NET_GDR_LEVEL}" = "DEFAULT" ]
                     then
-                        MPIRUN_OPTIONS_GDR_READ=""
+                        MPIRUN_OPTIONS_GDR_LEVEL=""
                     else
-                        MPIRUN_OPTIONS_GDR_READ="-x NCCL_NET_GDR_READ=${NCCL_NET_GDR_READ}"
+                        MPIRUN_OPTIONS_GDR_LEVEL="-x NCCL_NET_GDR_LEVEL=${NCCL_NET_GDR_LEVEL}"
                     fi
 
-                    echo_hash_line
-                    echo "# Test $i..."
-                    echo_hash_line
+                    #===================
+                    # NCCL_NET_GDR_READ
+                    #===================
+                    # for NCCL_NET_GDR_READ in 0 1 DEFAULT
+                    for NCCL_NET_GDR_READ in DEFAULT
+                    do
+                        if [ "${NCCL_NET_GDR_READ}" = "DEFAULT" ]
+                        then
+                            MPIRUN_OPTIONS_GDR_READ=""
+                        else
+                            MPIRUN_OPTIONS_GDR_READ="-x NCCL_NET_GDR_READ=${NCCL_NET_GDR_READ}"
+                        fi
 
-                    echo "INFO: NCCL_PROTO          = ${NCCL_PROTO}"
-                    echo "INFO: NCCL_ALGO           = ${NCCL_ALGO}"
-                    echo "INFO: SHARP_ENABLE        = ${SHARP_ENABLE}"
-                    echo "INFO: NCCL_NET_GDR_LEVEL  = ${NCCL_NET_GDR_LEVEL}"
-                    echo "INFO: NCCL_NET_GDR_READ   = ${NCCL_NET_GDR_READ}"
+                        echo_hash_line
+                        echo "# Test $i..."
+                        echo_hash_line
 
-                    CMD="mpirun \
-                        ${MPIRUN_OPTIONS_COMMON} \
-                        ${MPIRUN_OPTIONS_NCCL_PROTO} \
-                        ${MPIRUN_OPTIONS_NCCL_ALGO} \
-                        ${MPIRUN_OPTIONS_SHARP} \
-                        ${MPIRUN_OPTIONS_GDR_LEVEL} \
-                        ${MPIRUN_OPTIONS_GDR_READ} \
-                        ${MPI_APP}"
-                    echo "# Test $i reproducer:"
-                    echo "export PATH=${PATH}"
-                    echo ""
-                    echo "export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
-                    echo ""
-                    echo "export OPAL_PREFIX=${OPAL_PREFIX}"
-                    echo ""
-                    trim_multiple_spaces "$CMD"
-                    if ! $CMD
-                    then
-                        echo "# Test $i... failed"
-                        GLOBAL_TEST_STATUS=1
-                    else
-                        echo "# Test $i... passed"
-                    fi
+                        echo "INFO: NCCL_PROTO          = ${NCCL_PROTO}"
+                        echo "INFO: NCCL_ALGO           = ${NCCL_ALGO}"
+                        echo "INFO: SHARP_ENABLE        = ${SHARP_ENABLE}"
+                        echo "INFO: NCCL_NET_GDR_LEVEL  = ${NCCL_NET_GDR_LEVEL}"
+                        echo "INFO: NCCL_NET_GDR_READ   = ${NCCL_NET_GDR_READ}"
 
-                    i=$((i + 1))
+                        CMD="mpirun \
+                            ${MPIRUN_OPTIONS_COMMON} \
+                            ${MPIRUN_OPTIONS_NCCL_PROTO} \
+                            ${MPIRUN_OPTIONS_NCCL_ALGO} \
+                            ${MPIRUN_OPTIONS_SHARP} \
+                            ${MPIRUN_OPTIONS_GDR_LEVEL} \
+                            ${MPIRUN_OPTIONS_GDR_READ} \
+                            ${MPIRUN_OPTIONS_PLUGIN_P2P_LAYER} \
+                            ${MPI_APP}"
+                        echo "# Test $i reproducer:"
+                        echo "export PATH=${PATH}"
+                        echo ""
+                        echo "export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+                        echo ""
+                        echo "export OPAL_PREFIX=${OPAL_PREFIX}"
+                        echo ""
+                        trim_multiple_spaces "$CMD"
+                        if ! $CMD
+                        then
+                            echo "# Test $i... failed"
+                            GLOBAL_TEST_STATUS=1
+                        else
+                            echo "# Test $i... passed"
+                        fi
+
+                        i=$((i + 1))
+                    done
                 done
             done
         done

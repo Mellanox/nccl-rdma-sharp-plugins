@@ -18,6 +18,12 @@
 #include "socket.h"
 #include "utils.h"
 
+typedef enum nccl_p2p_plugin {
+  NCCL_P2P_IB,
+  NCCL_P2P_UCX,
+  NCCL_P2P_LAST
+} nccl_p2p_plugin_t;
+
 typedef struct ncclIbDev {
   int      device;
   uint64_t guid;
@@ -51,5 +57,7 @@ int nccl_p2p_ib_width(int width);
 int nccl_p2p_ib_speed(int speed);
 
 int64_t ncclParamSharpMaxComms();
+
+nccl_p2p_plugin_t nccl_p2p_get_plugin_type();
 
 #endif
