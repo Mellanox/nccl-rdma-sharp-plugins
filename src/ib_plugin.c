@@ -30,7 +30,6 @@
 static char ncclIbIfName[MAX_IF_NAME_SIZE];
 static union socketAddress ncclIbIfAddr;
 static int ncclNIbDevs = -1;
-extern int ncclNSharpDevs;
 
 struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
 struct userIbDev userIbDevs[MAX_IB_DEVS];

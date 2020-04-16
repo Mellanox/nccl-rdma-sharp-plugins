@@ -17,13 +17,21 @@
 #include "debug.h"
 #include "p2p_plugin.h"
 
-
+#ifdef HAVE_UCX_PLUGIN
 extern ncclNet_t ucxPlugin;
+#endif
+
 extern ncclNet_t ibPlugin;
-extern int ncclNSharpDevs;
 pthread_mutex_t nccl_p2p_lock = PTHREAD_MUTEX_INITIALIZER;
 
 ncclDebugLogger_t pluginLogFunction;
+
+#ifdef HAVE_SHARP_PLUGIN
+extern int ncclNSharpDevs;
+#else
+/* In case sharp plugin is not there just define this variable locally to make code cleaner */
+int ncclNSharpDevs;
+#endif
 NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
 
 ncclResult_t pluginInit(ncclDebugLogger_t logFunction);
@@ -68,8 +76,11 @@ ncclResult_t pluginInit(ncclDebugLogger_t logFunction) {
     case NCCL_P2P_IB:
       NCCL_PLUGIN_SYMBOL = ibPlugin;
       break;
+#ifdef HACE_UCX_PLUGIN
     case NCCL_P2P_UCX:
       NCCL_PLUGIN_SYMBOL = ucxPlugin;
+      break:
+#endif
   }
 
   return NCCL_PLUGIN_SYMBOL.init(logFunction);
@@ -231,9 +242,14 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
       char line[1024];
       line[0] = '\0';
       for (int d=0; d<ncclNIbDevs; d++) {
+#ifdef HAVE_SHARP_PLUGIN
         snprintf(line+strlen(line), 1023-strlen(line), " [%d]%s:%d/%s%s", d, ncclIbDevs[d].devName,
             ncclIbDevs[d].port, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE",
             ncclIbDevs[d].isSharpDev ? "/SHARP" : "");
+#else
+        snprintf(line+strlen(line), 1023-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
+            ncclIbDevs[d].port, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
+#endif
       }
       line[1023] = '\0';
       char addrline[1024];

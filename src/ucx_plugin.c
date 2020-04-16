@@ -43,7 +43,6 @@ static const ucp_tag_t tag      = 0xABADBABE;
 static const ucp_tag_t tag_mask = 0xFFFFFFFFFFFFFFFF;
 
 static int ncclNIbDevs = -1;
-extern int ncclNSharpDevs;
 
 /*
  * If request == REQUEST_COMPLETED_ZERO_LENGTGH:
