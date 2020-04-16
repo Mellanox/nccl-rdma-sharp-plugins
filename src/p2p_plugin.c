@@ -57,7 +57,8 @@ ncclNet_t NCCL_PLUGIN_SYMBOL = {
 
 static nccl_p2p_plugin_t p2p_plugin = NCCL_P2P_LAST;
 
-ncclResult_t pluginInit(ncclDebugLogger_t logFunction) {
+ncclResult_t pluginInit(ncclDebugLogger_t logFunction)
+{
   pluginLogFunction = logFunction;
   p2p_plugin = NCCL_P2P_IB;
 
@@ -76,12 +77,13 @@ ncclResult_t pluginInit(ncclDebugLogger_t logFunction) {
     case NCCL_P2P_IB:
       NCCL_PLUGIN_SYMBOL = ibPlugin;
       break;
-#ifdef HACE_UCX_PLUGIN
+#ifdef HAVE_UCX_PLUGIN
     case NCCL_P2P_UCX:
       NCCL_PLUGIN_SYMBOL = ucxPlugin;
-      break:
+      break;
 #endif
-  }
+  INFO(NCCL_INIT|NCCL_NET, "P2P plugin %s", NCCL_PLUGIN_SYMBOL.name);
+}
 
   return NCCL_PLUGIN_SYMBOL.init(logFunction);
 }

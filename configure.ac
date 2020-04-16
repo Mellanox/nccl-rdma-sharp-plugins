@@ -44,6 +44,16 @@ AC_PROG_LIBTOOL
 AC_HEADER_STDC
 LT_LIB_M
 
+AC_ARG_ENABLE([debug],AS_HELP_STRING([--enable-debug], [Enable extra debugging code (default is NO).]),
+              [], [enable_debug=no])
+
+if test $enable_debug = yes; then
+	AC_DEFINE([ENABLE_DEBUG], [1], [Enable debugging code])
+	CFLAGS="$CFLAGS -O0 -g3"
+else
+	CFLAGS="$CFLAGS -O3 -DNDEBUG"
+fi
+
 #check for cuda
 AC_ARG_WITH([cuda],
             [AC_HELP_STRING([--with-cuda=PATH],
