@@ -235,11 +235,19 @@ static ncclResult_t ucx_init_context(ucp_context_h *ctx, int dev) {
 
 static ncclResult_t ucx_init_worker(ucp_context_h ctx, ucp_worker_h *worker) {
   ucp_worker_params_t worker_params;
+  ucp_worker_attr_t   worker_attr;
 
   memset(&worker_params, 0, sizeof(worker_params));
   worker_params.field_mask  = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
-  worker_params.thread_mode = UCS_THREAD_MODE_SINGLE;
+  worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
+
   UCXCHECK(ucp_worker_create(ctx, &worker_params, worker));
+
+  worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_THREAD_MODE;
+  ucp_worker_query(*worker, &worker_attr);
+  if (worker_attr.thread_mode != UCS_THREAD_MODE_MULTI) {
+    INFO(NCCL_NET, "Thread mode multi is not supported");
+  }
 
   return ncclSuccess;
 }

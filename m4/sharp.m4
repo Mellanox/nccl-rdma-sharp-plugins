@@ -66,7 +66,6 @@ AS_IF([test "x$sharp_checked" != "xyes"],[
 
         AS_IF([test "x$sharp_happy" = "xyes"],
         [
-
             AS_IF([test ! -v "$check_sharp_dir"],
             [
                 AC_MSG_RESULT([SHARP dir: $check_sharp_dir])

@@ -95,7 +95,7 @@ CHECK_SHARP
 AC_MSG_RESULT([SHARP support: $sharp_happy])
 
 #check for required headers
-AC_CHECK_HEADERS([limits.h stdlib.h string.h unistd.h cuda_runtime.h], [],
+AC_CHECK_HEADERS([limits.h stdlib.h string.h unistd.h], [],
                  [AC_MSG_FAILURE([unable to find required headers])])
 
 AC_CONFIG_FILES([Makefile
