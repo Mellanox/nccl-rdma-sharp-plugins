@@ -43,7 +43,6 @@ static const ucp_tag_t tag      = 0xABADBABE;
 static const ucp_tag_t tag_mask = 0xFFFFFFFFFFFFFFFF;
 
 static int ncclNIbDevs = -1;
-extern int ncclNSharpDevs;
 
 /*
  * If request == REQUEST_COMPLETED_ZERO_LENGTGH:
@@ -236,11 +235,19 @@ static ncclResult_t ucx_init_context(ucp_context_h *ctx, int dev) {
 
 static ncclResult_t ucx_init_worker(ucp_context_h ctx, ucp_worker_h *worker) {
   ucp_worker_params_t worker_params;
+  ucp_worker_attr_t   worker_attr;
 
   memset(&worker_params, 0, sizeof(worker_params));
   worker_params.field_mask  = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
-  worker_params.thread_mode = UCS_THREAD_MODE_SINGLE;
+  worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
+
   UCXCHECK(ucp_worker_create(ctx, &worker_params, worker));
+
+  worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_THREAD_MODE;
+  ucp_worker_query(*worker, &worker_attr);
+  if (worker_attr.thread_mode != UCS_THREAD_MODE_MULTI) {
+    INFO(NCCL_NET, "Thread mode multi is not supported");
+  }
 
   return ncclSuccess;
 }
@@ -640,7 +647,7 @@ ncclResult_t nccl_ucx_isend(void *send_comm, void *data, int size, void *mhandle
   }
 
   comm->fifo_head++;
-  *request = req ? req : (size ? REQUEST_COMPLETED_ZERO_LENGTGH: REQUEST_COMPLETED_NON_ZERO_LENGTH);
+  *request = req ? req : (size ? (void*)REQUEST_COMPLETED_ZERO_LENGTGH: (void*)REQUEST_COMPLETED_NON_ZERO_LENGTH);
 
   return ncclSuccess;
 }
@@ -669,13 +676,32 @@ ncclResult_t nccl_ucx_irecv(void *recv_comm, void *data, int size, void *mhandle
 
   comm->tail++;
   ucp_put_nbi(comm->ep, &comm->tail, sizeof(uint32_t), comm->rem_tail_addr, comm->rkey);
-  *request = req ? req : (size ? REQUEST_COMPLETED_ZERO_LENGTGH: REQUEST_COMPLETED_NON_ZERO_LENGTH);
+  *request = req ? req : (size ? (void*)REQUEST_COMPLETED_ZERO_LENGTGH: (void*)REQUEST_COMPLETED_NON_ZERO_LENGTH);
 
   return ncclSuccess;
 }
 
 ncclResult_t nccl_ucx_flush(void* recv_comm, void* data, int size, void* mhandle) {
-  //TODO: add flush
+  ucx_recv_comm_t *comm = (ucx_recv_comm_t *)recv_comm;
+  ucx_mhandle_t   *mh   = (ucx_mhandle_t*)mhandle;
+  ucx_request_t   *req;
+
+  if ((comm->gpuFlush.enabled == 0) || (size == 0)) {
+    return ncclSuccess;
+  }
+
+  req = ucp_get_nb(comm->gpuFlush.flush_ep, &comm->gpuFlush.hostMem, 1, (uint64_t)data, mh->rkey, send_handler);
+  if (UCS_PTR_IS_ERR(req)) {
+    WARN("ucx_flush: unable to read data (%s)", ucs_status_string(UCS_PTR_STATUS(req)));
+    return ncclSystemError;
+  } else if (req != NULL) {
+    while(req->completed == 0) {
+      ucp_worker_progress(comm->worker);
+    }
+    req->completed = 0;
+    ucp_request_release(req);
+  }
+
   return ncclSuccess;
 }
 
