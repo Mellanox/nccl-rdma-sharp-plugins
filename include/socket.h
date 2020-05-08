@@ -65,6 +65,9 @@ static inline int envSocketFamily(void) {
 static int filterInterfaces(const char* prefixList, char* names, union socketAddress *addrs, int sock_family, int maxIfNameSize, int maxIfs) {
   struct netIf userIfs[MAX_IFS];
   int searchNot = prefixList && prefixList[0] == '^';
+  if (searchNot) prefixList++;
+  int searchExact = prefixList && prefixList[0] == '=';
+  if (searchExact) prefixList++;
   int nUserIfs = parseStringList(prefixList, userIfs, MAX_IFS);
 
   int found = 0;
@@ -91,7 +94,7 @@ static int filterInterfaces(const char* prefixList, char* names, union socketAdd
     }
 
     // check against user specified interfaces
-    if (!(matchIfList(interface->ifa_name, -1, userIfs, nUserIfs) ^ searchNot)) {
+    if (!(matchIfList(interface->ifa_name, -1, userIfs, nUserIfs, searchExact) ^ searchNot)) {
       continue;
     }
 
