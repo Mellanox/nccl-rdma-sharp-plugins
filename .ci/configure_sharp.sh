@@ -1,8 +1,18 @@
 #!/bin/bash -l
 
-SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
-cd ${SCRIPT_DIR}
-. ${SCRIPT_DIR}/settings.sh
+SCRIPT_DIR="$( cd "$(dirname "$0")" || exit 1 ; pwd -P )"
+cd "${SCRIPT_DIR}" || exit 1
+# shellcheck source=settings.sh
+. "${SCRIPT_DIR}/settings.sh"
+
+if [ -z "${NCCL_RDMA_SHARP_PLUGINS_DIR}" ]
+then
+    echo "ERROR: NCCL_RDMA_SHARP_PLUGINS_DIR is not defined"
+    echo "FAIL"
+    exit 1
+fi
+
+export LD_LIBRARY_PATH="${NCCL_RDMA_SHARP_PLUGINS_DIR}/lib:${LD_LIBRARY_PATH}"
 
 # 1 - run sanity tests, 0 - do not run
 VERIFY_SHARP_ENABLE=${VERIFY_SHARP_ENABLE:-1}
@@ -35,12 +45,12 @@ then
 fi
 
 CONFIGURE_SHARP_TMP_DIR="${NFS_WORKSPACE}/configure_sharp_$$"
-mkdir -p ${CONFIGURE_SHARP_TMP_DIR}
+mkdir -p "${CONFIGURE_SHARP_TMP_DIR}"
 
 export SHARP_CONF="${CONFIGURE_SHARP_TMP_DIR}"
 export SHARP_INI_FILE="${SHARP_CONF}/sharp_manager.ini"
 
-cp -R ${CFG_DIR}/$HOSTNAME/sharp_conf/* ${SHARP_CONF}
+cp -R "${CFG_DIR}/$HOSTNAME/sharp_conf/"* "${SHARP_CONF}"
 
 if [ -f "${SHARP_CONF}/sharp_am_node.txt" ]
 then
@@ -137,19 +147,22 @@ verify_sharp() {
 
     ITERS=100
     SKIP=20
+    NP=$(wc --lines "$HOSTFILE" | awk '{print $1}')
 
     # -mca coll_hcoll_enable 0 - disable HCOLL
     MPIRUN_COMMON_OPTIONS="\
-        -np 2 \
+        -np $NP \
         -H $HOSTS \
         --map-by node \
         -x LD_LIBRARY_PATH \
+        --allow-run-as-root \
     "
 
+    # TODO change to SHARP_COLL_SAT_THRESHOLD=1 (32 - W/A for SHARP issue)
     MPIRUN_SHARP_OPTIONS="\
         -x SHARP_COLL_LOG_LEVEL=3 \
         -x ENABLE_SHARP_COLL=1 \
-        -x SHARP_COLL_SAT_THRESHOLD=1 \
+        -x SHARP_COLL_SAT_THRESHOLD=32 \
         -x SHARP_COLL_ENABLE_SAT=1 \
     "
 
@@ -208,11 +221,9 @@ verify_sharp() {
     # Test 3 (from ${HPCX_SHARP_DIR}/share/sharp/examples/mpi/coll/README):
     # Run allreduce perf test on 2 hosts using port mlx5_0 with Streaming aggregation from 4B to 512MB
     echo "Test 3..."
-    # TODO: -x SHARP_COLL_ENABLE_SAT=1 - move
     CMD="mpirun \
             ${MPIRUN_COMMON_OPTIONS} \
             ${MPIRUN_SHARP_OPTIONS} \
-            -x SHARP_COLL_ENABLE_SAT=1 \
             ${CONFIGURE_SHARP_TMP_DIR}/sharp_coll_test \
                 -d mlx5_0:1 \
                 --iters $ITERS \

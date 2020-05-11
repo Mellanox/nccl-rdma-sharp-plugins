@@ -15,5 +15,5 @@ Hardware
 * GPU: 1x Nvidia Tesla K40m
 
 Software
-* Ubuntu 16.04.6
+* Ubuntu 18.04.4
 * Internal stable MLNX_OFED, HPC-X and SHARP versions
