@@ -168,6 +168,9 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
       char* userIbEnv = getenv("NCCL_IB_HCA");
       struct netIf userIfs[MAX_IB_DEVS];
       int searchNot = userIbEnv && userIbEnv[0] == '^';
+      if (searchNot) userIbEnv++;
+      int searchExact = userIbEnv && userIbEnv[0] == '=';
+      if (searchExact) userIbEnv++;
       int nUserIfs = parseStringList(userIbEnv, userIfs, MAX_IB_DEVS);
 
       if (ncclSuccess != wrap_ibv_get_device_list(&devices, &nIbDevs)) return ncclInternalError;
@@ -197,7 +200,7 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
               && portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
 
           // check against user specified HCAs/ports
-          if (! (matchIfList(devices[d]->name, port, userIfs, nUserIfs) ^ searchNot)) {
+          if (! (matchIfList(devices[d]->name, port, userIfs, nUserIfs, searchExact) ^ searchNot)) {
             continue;
           }
           TRACE(NCCL_INIT|NCCL_NET,"NET/IB: [%d] %s:%d/%s ", d, devices[d]->name, port,
