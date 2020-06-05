@@ -62,6 +62,11 @@ ncclResult_t pluginInit(ncclDebugLogger_t logFunction)
   pluginLogFunction = logFunction;
   p2p_plugin = NCCL_P2P_IB;
 
+  const char *plugin_path = get_plugin_lib_path();
+  if (plugin_path != NULL) {
+    INFO(NCCL_INIT|NCCL_NET, "Plugin Path : %s", plugin_path);;
+  }
+
   NCCL_PLUGIN_SYMBOL = ibPlugin;
   const char *p2p_layer = getenv("NCCL_PLUGIN_P2P");
   if (p2p_layer != NULL) {
