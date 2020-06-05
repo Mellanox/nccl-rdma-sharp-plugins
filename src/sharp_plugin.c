@@ -171,6 +171,10 @@ ncclResult_t ncclSharpInit(ncclDebugLogger_t logFunction) {
   gettimeofday(&tval, NULL);
   srand((int) tval.tv_usec);
 
+  /* set SHARP COLL library default for plugin */
+  setenv("SHARP_COLL_ENABLE_SAT", "1", 0);
+  setenv("SHARP_COLL_LOG_LEVEL", "3", 0);
+
   return NCCL_PLUGIN_SYMBOL.init(logFunction);
 }
 
