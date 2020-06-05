@@ -26,5 +26,6 @@ struct netIf {
 int parseStringList(const char* string, struct netIf* ifList, int maxList);
 int matchIfList(const char* string, int port, struct netIf* ifList, int listSize, int matchExact);
 int readFileNumber(long *value, const char *filename_fmt, ...);
+const char *get_plugin_lib_path();
 
 #endif

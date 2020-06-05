@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#define _GNU_SOURCE
 #include "utils.h"
 #include "core.h"
 #include <unistd.h>
@@ -12,6 +13,7 @@
 #include <stdarg.h>
 #include <ctype.h>
 #include <fcntl.h>
+#include <dlfcn.h>
 
 // Allocate memory to be potentially ibv_reg_mr'd. This needs to be
 // allocated on separate pages as those pages will be marked DONTFORK
@@ -138,4 +140,15 @@ int readFileNumber(long *value, const char *filename_fmt, ...)
 
   *value = n;
   return 0;
+}
+
+const char *get_plugin_lib_path()
+{
+  Dl_info dl_info;
+  int ret;
+
+  ret = dladdr((void*)&get_plugin_lib_path, &dl_info);
+  if (ret == 0) return NULL;
+
+  return dl_info.dli_fname;
 }
