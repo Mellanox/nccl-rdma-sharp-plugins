@@ -641,7 +641,6 @@ ncclResult_t nccl_ucx_isend(void *send_comm, void *data, int size, void *mhandle
     WARN("ucx_isend: unable to send message (%s)\n", ucs_status_string(UCS_PTR_STATUS(req)));
     return ncclSystemError;
   } else if (req != NULL) {
-    ucp_worker_progress(comm->worker);
     req->worker = comm->worker;
     req->size = size;
   }
@@ -669,7 +668,6 @@ ncclResult_t nccl_ucx_irecv(void *recv_comm, void *data, int size, void *mhandle
     WARN("ucx_irecv: unable to receive message (%s)", ucs_status_string(UCS_PTR_STATUS(req)));
     return ncclSystemError;
   } else if (req != NULL) {
-    ucp_worker_progress(comm->worker);
     req->worker = comm->worker;
     req->size = size;
   }
@@ -707,29 +705,30 @@ ncclResult_t nccl_ucx_flush(void* recv_comm, void* data, int size, void* mhandle
 
 ncclResult_t nccl_ucx_test(void *request, int *done, int *size) {
   ucx_request_t *req = (ucx_request_t *)request;
+  unsigned p = 0;
 
   *done = 0;
-  if (((uint64_t)request == REQUEST_COMPLETED_ZERO_LENGTGH) ||
-      ((uint64_t)request == REQUEST_COMPLETED_NON_ZERO_LENGTH)) {
-    *done = 1;
-    if (size) {
-      *size = -1 + (uint64_t)request;
-    }
-    return ncclSuccess;
-  }
-
-  if (req->completed == 1) {
-    *done = 1;
-    if (size) {
-      *size = req->size;
+  do {
+    if (((uint64_t)request == REQUEST_COMPLETED_ZERO_LENGTGH) ||
+        ((uint64_t)request == REQUEST_COMPLETED_NON_ZERO_LENGTH)) {
+      *done = 1;
+      if (size) {
+        *size = -1 + (uint64_t)request;
+      }
+      return ncclSuccess;
     }
 
-    req->completed = 0;
-    ucp_request_free(req);
-  }
-  else {
-    ucp_worker_progress(req->worker);
-  }
+    if (req->completed == 1) {
+      *done = 1;
+      if (size) {
+        *size = req->size;
+      }
+      req->completed = 0;
+      ucp_request_free(req);
+      return ncclSuccess;
+    }
+    p = ucp_worker_progress(req->worker);
+  } while(p);
 
   return ncclSuccess;
 }

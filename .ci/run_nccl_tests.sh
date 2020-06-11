@@ -122,7 +122,7 @@ i=1
 #===================
 # NCCL_PLUGIN_P2P
 #===================
-for P2P_LAYER in ucx ib
+for P2P_LAYER in ucx_rma ucx ib
 do
     MPIRUN_OPTIONS_PLUGIN_P2P_LAYER="-x NCCL_PLUGIN_P2P=${P2P_LAYER}"
 
