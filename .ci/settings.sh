@@ -22,7 +22,7 @@ module load "dev/cuda${CUDA_VER}"
 
 # TODO remove use HPC-X which is already inside the image
 #
-HPCX_UBUNTU_INSTALL_DIR=${HPCX_UBUNTU_INSTALL_DIR:-/.autodirect/mtrswgwork/artemry/ci_tools_do_not_remove/hpcx-v2.6.0-gcc-MLNX_OFED_LINUX-5.0-1.0.0.0-ubuntu18.04-x86_64/}
+HPCX_UBUNTU_INSTALL_DIR=${HPCX_UBUNTU_INSTALL_DIR:-/.autodirect/mtrswgwork/artemry/ci_tools_do_not_remove/hpcx-v2.7.pre-gcc-MLNX_OFED_LINUX-5.0-1.0.0.0-ubuntu18.04-x86_64/}
 # shellcheck source=/.autodirect/mtrswgwork/artemry/ci_tools_do_not_remove/hpcx-v2.6.0-gcc-MLNX_OFED_LINUX-5.0-1.0.0.0-ubuntu18.04-x86_64/hpcx-init.sh
 . "${HPCX_UBUNTU_INSTALL_DIR}/hpcx-init.sh"
 hpcx_load
