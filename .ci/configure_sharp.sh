@@ -344,7 +344,7 @@ verify_sharp() {
             -x SHARP_COLL_JOB_QUOTA_PAYLOAD_PER_OST=256 \
             taskset -c 1 \
                 numactl --membind=0 \
-                    $OMPI_HOME/tests/osu-micro-benchmarks-5.3.2/osu_allreduce \
+                    $HPCX_OSU_DIR/osu_allreduce \
                         -i 100 \
                         -x 100 \
                         -f \
@@ -388,7 +388,7 @@ verify_sharp() {
             -x SHARP_COLL_ENABLE_SAT=1 \
             taskset -c 1 \
                 numactl --membind=0 \
-                    $OMPI_HOME/tests/osu-micro-benchmarks-5.3.2/osu_allreduce \
+                    $HPCX_OSU_DIR/osu_allreduce \
                         -i 100 \
                         -x 100 \
                         -f \

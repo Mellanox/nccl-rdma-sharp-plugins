@@ -99,8 +99,9 @@ enum {
   UCX_RMA_REQ_TYPE_RECV
 };
 
+#define MAX_UCX_REQ_SIZE 256
 typedef struct nccl_ucx_rma_request {
-  char             ucx_req[256];
+  char             ucx_req[MAX_UCX_REQ_SIZE];
   int              used;
   int              type;
   int              done;
@@ -120,7 +121,6 @@ typedef struct ucx_rma_send_fifo {
   uint32_t ready;
   int      rkey_idx;
   int      req_id;
-  char     rkey_buf[40];
 } ucx_rma_send_fifo_t;
 
 typedef struct nccl_ucx_rma_ctx {
@@ -349,7 +349,6 @@ ncclResult_t nccl_ucx_rma_init(ncclDebugLogger_t logFunction)
     INFO(NCCL_NET, "NET/UCX_RMA: zero copy threshold: %s", nccl_ucx_rma_zcopy_thresh);
   }
 
-
   return ncclSuccess;
 }
 
@@ -425,6 +424,13 @@ ncclResult_t nccl_ucx_rma_connect(int dev, void *handle, void **send_comm)
   return ncclSuccess;
 }
 
+enum {
+  NCCL_UCX_RMA_REQUEST_INPROGRESS = 0,
+  NCCL_UCX_RMA_REQUEST_PUT_DONE   = 1,
+  NCCL_UCX_RMA_REQUEST_AM_DONE    = 2,
+  NCCL_UCX_RMA_REQUEST_DONE       = 3,
+};
+
 static ucs_status_t nccl_ucx_rma_am_cb(void *arg, void *data, size_t length,
                                        ucp_ep_h reply_ep, unsigned flags)
 {
@@ -434,7 +440,7 @@ static ucs_status_t nccl_ucx_rma_am_cb(void *arg, void *data, size_t length,
   int      id      = *header >>32 ;
 
   reqs[id].size = size;
-  reqs[id].done = 2;
+  reqs[id].done = NCCL_UCX_RMA_REQUEST_DONE;
 
   return UCS_OK;
 }
@@ -588,7 +594,7 @@ ncclResult_t ucx_rma_get_request(nccl_ucx_rma_request_t* reqs, int* req_id)
     if (r->used == 0) {
       r->used = 1;
       r->type = 0;
-      r->done = 0;
+      r->done = NCCL_UCX_RMA_REQUEST_INPROGRESS;
       r->size = -1;
       r->free = 0;
       r->st   = NULL;
@@ -607,12 +613,22 @@ static void nccl_ucx_rma_flush_cb(void *request, ucs_status_t status)
   return;
 }
 
+/*
+ * nccl_ucx_rma_send_check prepeares send communictor to be used for actual data
+ * communication and consists of multiple stages:
+ */
 enum {
-  NCCL_UCX_RMA_SCOMM_NOT_READY = 0,
-  NCCL_UCX_RMA_SCOMM_EP_CREATED,
-  NCCL_UCX_RMA_SCOMM_EP_FLUSHED,
-  NCCL_UCX_RMA_SCOMM_WAIT_RKEY,
-  NCCL_UCX_RMA_SCOMM_READY 
+  NCCL_UCX_RMA_SCOMM_NOT_READY = 0, /* initial comm state, only ucp worker is present
+                                     * wait for remote worker addr and create ep
+                                     * notify peer that endpoint has been created
+                                     */
+  NCCL_UCX_RMA_SCOMM_EP_CREATED,    /* endpoint is created but it's not gurantee that
+                                     * wireup is done. ucp_ep_flush is used to finish
+                                     * wireup process
+                                     */
+  NCCL_UCX_RMA_SCOMM_EP_FLUSH_WAIT, /* ep flush is in progress */
+  NCCL_UCX_RMA_SCOMM_WAIT_RKEY,     /* wait for active message from peer with rkeys */
+  NCCL_UCX_RMA_SCOMM_READY          /* communicator is ready, notify peer */
 };
 
 static ncclResult_t nccl_ucx_rma_send_check(nccl_ucx_rma_send_comm_t *comm)
@@ -638,11 +654,11 @@ static ncclResult_t nccl_ucx_rma_send_check(nccl_ucx_rma_send_comm_t *comm)
     } else if (UCS_PTR_IS_ERR(comm->super.check_req)) {
       return ncclSystemError;
     } else {
-      comm->super.ready = NCCL_UCX_RMA_SCOMM_EP_FLUSHED;
+      comm->super.ready = NCCL_UCX_RMA_SCOMM_EP_FLUSH_WAIT;
     }
   }
 
-  if (comm->super.ready == NCCL_UCX_RMA_SCOMM_EP_FLUSHED) {
+  if (comm->super.ready == NCCL_UCX_RMA_SCOMM_EP_FLUSH_WAIT) {
     st = ucp_request_check_status(comm->super.check_req);
     if (st != UCS_INPROGRESS) {
       ucp_request_free(comm->super.check_req);
@@ -659,20 +675,23 @@ static ncclResult_t nccl_ucx_rma_send_check(nccl_ucx_rma_send_comm_t *comm)
   return ncclSuccess;
 }
 
+/*
+ * nccl_ucx_rma_recv_check prepeares recv communictor to be used for actual data
+ * communication and consists of multiple stages:
+ */
 enum {
-  NCCL_UCX_RMA_RCOMM_SEND_CONN_INFO = 0,
-  NCCL_UCX_RMA_RCOMM_WAIT_SENDER,
-  NCCL_UCX_RMA_RCOMM_AM_SEND,
-  NCCL_UCX_RMA_RCOMM_WAIT_AM,
-  NCCL_UCX_RMA_RCOMM_WAIT_SCOMM,
-  NCCL_UCX_RMA_RCOMM_READY,
+  NCCL_UCX_RMA_RCOMM_SEND_CONN_INFO = 0, /* initial stage, send worker address to peer */ 
+  NCCL_UCX_RMA_RCOMM_WAIT_SENDER,        /* wait for peer endpoint is created */
+  NCCL_UCX_RMA_RCOMM_AM_SEND,            /* send AM containing rkey_bufs */
+  NCCL_UCX_RMA_RCOMM_WAIT_AM,            /* wait for AM send */
+  NCCL_UCX_RMA_RCOMM_WAIT_SCOMM,         /* wait for send communicator ready notification */
+  NCCL_UCX_RMA_RCOMM_READY,              /* recv comm ready */
 };
 
 static void nccl_ucx_rma_recv_check_cb(void *request, ucs_status_t status)
 {
   return;
 }
-
 
 static ncclResult_t nccl_ucx_rma_recv_check(nccl_ucx_rma_recv_comm_t *comm)
 {
@@ -709,6 +728,9 @@ static ncclResult_t nccl_ucx_rma_recv_check(nccl_ucx_rma_recv_comm_t *comm)
   }
 
   if (comm->super.ready == NCCL_UCX_RMA_RCOMM_AM_SEND) {
+    /* active message structure
+     * [num_rkey_bufs][rkey_buf_size][rkey_buf1][rkey_buf2]...[rkey_buf_n]
+     */
     size = 2 * sizeof(size_t) + comm->super.num_mh * comm->super.mh[0]->rkey_buf_size;
     comm->rkey_bufs = malloc(size);
     memcpy(comm->rkey_bufs, &comm->super.num_mh, sizeof(size_t));
@@ -760,11 +782,11 @@ static ncclResult_t nccl_ucx_rma_recv_check(nccl_ucx_rma_recv_comm_t *comm)
   return ncclSuccess;
 }
 
-static void nccl_ucx_rma_dummy_cb(void *request, ucs_status_t status)
+static void nccl_ucx_rma_am_isend_cb(void *request, ucs_status_t status)
 {
   nccl_ucx_am_request_t *req = (nccl_ucx_am_request_t*)request;
 
-  req->req->done += 1;
+  req->req->done |= NCCL_UCX_RMA_REQUEST_AM_DONE;
   return;
 }
 
@@ -772,7 +794,7 @@ static void nccl_ucx_rma_send_cb(void *request, ucs_status_t status, void *data)
 {
   nccl_ucx_rma_request_t *req = (nccl_ucx_rma_request_t*)data;
 
-  req->done += 1;
+  req->done |= NCCL_UCX_RMA_REQUEST_PUT_DONE;
   return;
 }
 
@@ -789,10 +811,10 @@ ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size,
 
   if (comm->super.ready != NCCL_UCX_RMA_SCOMM_READY) {
     NCCLCHECK(nccl_ucx_rma_send_check(comm));
-  }
-  if (comm->super.ready != NCCL_UCX_RMA_SCOMM_READY) {
-    *request = NULL;
-    return ncclSuccess;
+    if (comm->super.ready != NCCL_UCX_RMA_SCOMM_READY) {
+      *request = NULL;
+      return ncclSuccess;
+    }
   }
 
   slot = comm->fifo + (comm->fifo_head % MAX_REQUESTS);
@@ -817,21 +839,20 @@ ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size,
   st  = ucp_put_nbx(comm->ep, data, size, slot->addr,
                     comm->rem_key[slot->rkey_idx], &req_param);
 
-  req->done = 0;
   if (UCS_PTR_IS_ERR(st)) {
     WARN("NET/UCX_RMA: isend pub_nb failed");
     return ncclInternalError;
   } else if (st  == NULL) {
-    req->done += 1;
+    req->done |= NCCL_UCX_RMA_REQUEST_PUT_DONE;
   }
 
   ucp_worker_fence(comm->super.worker);
   req->am_msg = (((uint64_t)slot->req_id) << 32) | ((uint64_t)size);
   req->st = ucp_am_send_nb(comm->ep, comm->rem_am_id, &req->am_msg, 8,
-                           ucp_dt_make_contig(1), nccl_ucx_rma_dummy_cb, 0);
+                           ucp_dt_make_contig(1), nccl_ucx_rma_am_isend_cb, 0);
 
   if (req->st == NULL) {
-    req->done += 1;
+    req->done |= NCCL_UCX_RMA_REQUEST_AM_DONE;
   } else if (UCS_PTR_IS_PTR(req->st)) {
     nccl_ucx_am_request_t *am_req = (nccl_ucx_am_request_t*)req->st;
     am_req->req = req;
@@ -944,7 +965,7 @@ ncclResult_t nccl_ucx_rma_test(void *request, int *done, int *size)
 
   *done = 0;
   do {
-    if (req->done == 2) {
+    if (req->done == NCCL_UCX_RMA_REQUEST_DONE) {
       *done = 1;
       if (size) {
         *size = req->size;
