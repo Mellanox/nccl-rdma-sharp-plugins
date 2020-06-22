@@ -46,6 +46,7 @@ static int ncclNIbDevs = -1;
 #define MAX_UCX_RKEY_BUF_SIZE 128
 typedef struct nccl_ucx_rma_rkey_buf {
     int    index;
+    int    id;
     char   buf[MAX_UCX_RKEY_BUF_SIZE];
     size_t rkey_buf_size;
     int    send;
@@ -127,6 +128,7 @@ typedef struct ucx_rma_send_fifo {
   uint32_t seq;
   uint32_t ready;
   int      rkey_idx;
+  int      rkey_id;
   int      req_id;
 } ucx_rma_send_fifo_t;
 
@@ -389,12 +391,12 @@ static ucs_status_t nccl_ucx_rma_am_rkey_cb(void *arg, void *data, size_t length
   nccl_ucx_rma_send_comm_t *comm     = (nccl_ucx_rma_send_comm_t*)arg;
   nccl_ucx_rma_rkey_buf_t  *rkey_buf = (nccl_ucx_rma_rkey_buf_t*)data;
   
-  if (comm->rkeys[rkey_buf->index % NCCL_UCX_RMA_MAX_MHANDLES].rkey) {
-    ucp_rkey_destroy(comm->rkeys[rkey_buf->index % NCCL_UCX_RMA_MAX_MHANDLES].rkey);
+  if (comm->rkeys[rkey_buf->index].rkey) {
+    ucp_rkey_destroy(comm->rkeys[rkey_buf->index].rkey);
   }
-  comm->rkeys[rkey_buf->index % NCCL_UCX_RMA_MAX_MHANDLES].id = rkey_buf->index;
+  comm->rkeys[rkey_buf->index].id = rkey_buf->id;
   UCXCHECK(ucp_ep_rkey_unpack(comm->ep, rkey_buf->buf,
-                              &comm->rkeys[rkey_buf->index % NCCL_UCX_RMA_MAX_MHANDLES].rkey));
+                              &comm->rkeys[rkey_buf->index].rkey));
   return UCS_OK;
 }
 
@@ -555,6 +557,7 @@ ncclResult_t nccl_ucx_rma_regmr(void* comm, void* data, int size, int type,
   ucx_rma_mhandle_t    *mh;
   uint64_t             reg_addr, reg_size;
   void                 *rkey_buf;
+  int                  i;
   
   reg_addr = addr & (~(REG_ALIGN - 1));
   reg_size = addr + size - reg_addr;
@@ -565,11 +568,24 @@ ncclResult_t nccl_ucx_rma_regmr(void* comm, void* data, int size, int type,
   mmap_params.address    = (void*)reg_addr;
   mmap_params.length     = reg_size;
   
+  for (i = 0; i < NCCL_UCX_RMA_MAX_MHANDLES; i++) {
+    if (ctx->mh[i] == NULL) {
+      break;
+    }
+  }
+  if (i == NCCL_UCX_RMA_MAX_MHANDLES) {
+    WARN("NET UCX/RMA: too many mhandles");
+    return ncclSystemError;
+  }
+
   NCCLCHECK(ncclIbMalloc((void**)&mh, sizeof(ucx_rma_mhandle_t)));
   UCXCHECK(ucp_mem_map(ctx->ctx, &mmap_params, &mh->ucp_memh));
   UCXCHECK(ucp_rkey_pack(ctx->ctx, mh->ucp_memh, &rkey_buf, &mh->rkey_buf.rkey_buf_size));
   if (mh->rkey_buf.rkey_buf_size > MAX_UCX_RKEY_BUF_SIZE) {
     WARN("NET UCX/RMA: rkey_buf is too large");
+    ucp_mem_unmap(ctx->ctx, mh->ucp_memh);
+    ucp_rkey_buffer_release(rkey_buf);
+    free(mh);
     return ncclSystemError;
   }
   memcpy(mh->rkey_buf.buf, rkey_buf, mh->rkey_buf.rkey_buf_size);
@@ -578,10 +594,11 @@ ncclResult_t nccl_ucx_rma_regmr(void* comm, void* data, int size, int type,
     UCXCHECK(ucp_ep_rkey_unpack(ctx->gpuFlush.flush_ep, rkey_buf, &mh->rkey));
   }
   
-  mh->rkey_buf.index = ctx->num_mh;
+  mh->rkey_buf.index = i;
   mh->rkey_buf.send  = 0;
-  ctx->mh[ctx->num_mh % NCCL_UCX_RMA_MAX_MHANDLES] = mh;
-  ctx->num_mh++;
+  mh->rkey_buf.id    = ctx->num_mh;
+  ctx->mh[i]   = mh;
+  ctx->num_mh += 1;
   *mhandle = mh;
   ucp_rkey_buffer_release(rkey_buf);
 
@@ -593,7 +610,7 @@ ncclResult_t nccl_ucx_rma_deregmr(void* comm, void* mhandle)
   nccl_ucx_rma_ctx_t *ctx = (nccl_ucx_rma_ctx_t*)comm;
   ucx_rma_mhandle_t  *mh  = (ucx_rma_mhandle_t*)mhandle;
 
-//ucp_rkey_buffer_release
+  ctx->mh[mh->rkey_buf.index] = NULL;
   if (ctx->gpuFlush.enabled) {
       ucp_rkey_destroy(mh->rkey);
   }
@@ -754,6 +771,7 @@ ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size,
   volatile ucx_rma_send_fifo_t *slot;
   volatile uint32_t            *ready_ptr;
   volatile int                 *rkey_id;
+  volatile int                 *rkey_index;
   nccl_ucx_rma_request_t       *req;
   ucs_status_ptr_t             st;
   int                          req_id;
@@ -767,12 +785,13 @@ ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size,
     }
   }
 
-  slot      = comm->fifo + (comm->fifo_head % MAX_REQUESTS);
-  ready_ptr = &slot->ready;
-  rkey_id   = &slot->rkey_idx;
+  slot       = comm->fifo + (comm->fifo_head % MAX_REQUESTS);
+  ready_ptr  = &slot->ready;
+  rkey_id    = &slot->rkey_id;
+  rkey_index = &slot->rkey_idx;
 
   if ((*ready_ptr == 0) ||
-      (comm->rkeys[*rkey_id % NCCL_UCX_RMA_MAX_MHANDLES].id != *rkey_id)) {
+      (comm->rkeys[*rkey_index].id != *rkey_id)) {
     ucp_worker_progress(comm->super.worker);
     *request = NULL;
     return ncclSuccess;
@@ -790,7 +809,7 @@ ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size,
   req_param.request      = &req->used;
   
   st  = ucp_put_nbx(comm->ep, data, size, slot->addr,
-                    comm->rkeys[*rkey_id % NCCL_UCX_RMA_MAX_MHANDLES].rkey,
+                    comm->rkeys[*rkey_index].rkey,
                     &req_param);
 
   if (UCS_PTR_IS_ERR(st)) {
@@ -859,6 +878,7 @@ ncclResult_t nccl_ucx_rma_post_fifo(nccl_ucx_rma_recv_comm_t *comm,
   local_elem->size     = size;
   local_elem->seq      = comm->rem_fifo.tail;
   local_elem->rkey_idx = mh->rkey_buf.index;
+  local_elem->rkey_id  = mh->rkey_buf.id;
   local_elem->req_id   = req_id;
 
   remote_addr = comm->rem_fifo.addr + (comm->rem_fifo.tail % MAX_REQUESTS) *
