@@ -113,7 +113,7 @@ do
     #===================
     # NCCL_PLUGIN_P2P
     #===================
-    for P2P_LAYER in ucx ib
+    for P2P_LAYER in ucx ucx_rma ib
     do
         MPIRUN_OPTIONS_PLUGIN_P2P_LAYER="-x NCCL_PLUGIN_P2P=${P2P_LAYER}"
 
@@ -134,6 +134,12 @@ do
             #===================
             for NCCL_ALGO in CollNet Tree Ring DEFAULT
             do
+                if [ "${NCCL_ALGO}" = "CollNet" ] && [ "${TEST_EXE}" != "all_reduce_perf" ]
+                then
+                    # test sharp plugin only with all_reduce_perf
+                    continue
+                fi
+
                 if [ "${NCCL_ALGO}" = "DEFAULT" ]
                 then
                     MPIRUN_OPTIONS_NCCL_ALGO=""
@@ -151,6 +157,11 @@ do
                 #===================
                 for SHARP_ENABLE in 0 1
                 do
+                    if { [ "${NCCL_ALGO}" = "Tree" ] || [ "${NCCL_ALGO}" = "Ring" ]; } && [ "$SHARP_ENABLE" = "1" ] 
+                    then
+                        # skip sharp enable 1 for tree and ring algorithms
+                        continue
+                    fi
                     if [ "${SHARP_ENABLE}" = "0" ]
                     then
                         MPIRUN_OPTIONS_SHARP=""
@@ -191,6 +202,8 @@ do
                             echo "# Test $i..."
                             echo_hash_line
 
+                            echo "INFO: TEST                = ${TEST_EXE}"
+                            echo "INFO: P2P_LAYER           = ${P2P_LAYER}"
                             echo "INFO: NCCL_PROTO          = ${NCCL_PROTO}"
                             echo "INFO: NCCL_ALGO           = ${NCCL_ALGO}"
                             echo "INFO: SHARP_ENABLE        = ${SHARP_ENABLE}"
@@ -205,7 +218,7 @@ do
                                 ${MPIRUN_OPTIONS_GDR_LEVEL} \
                                 ${MPIRUN_OPTIONS_GDR_READ} \
                                 ${MPIRUN_OPTIONS_PLUGIN_P2P_LAYER} \
-                                ${NCCL_TESTS_DIR}/build/${NCCL_TEST_EXE[$TEST_EXE]} ${NCCL_TEST_PARAMS}"
+                                ${NCCL_TESTS_DIR}/build/${TEST_EXE} ${NCCL_TEST_PARAMS}"
                             echo "# Test $i reproducer:"
                             echo "export PATH=${PATH}"
                             echo ""
