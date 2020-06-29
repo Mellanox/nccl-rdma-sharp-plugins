@@ -21,6 +21,7 @@
 typedef enum nccl_p2p_plugin {
   NCCL_P2P_IB,
   NCCL_P2P_UCX,
+  NCCL_P2P_UCX_RMA,
   NCCL_P2P_LAST
 } nccl_p2p_plugin_t;
 
