@@ -50,7 +50,6 @@ typedef struct nccl_ucx_rma_rkey_buf {
     char   buf[MAX_UCX_RKEY_BUF_SIZE];
     size_t rkey_buf_size;
     int    send;
-
 } nccl_ucx_rma_rkey_buf_t;
 
 typedef struct ucx_rma_mhandle {
