@@ -57,13 +57,13 @@ AS_IF([test "x$ucx_checked" != "xyes"],[
 
         AS_IF([test "x$ucx_happy" = "xyes"],
         [
-            AS_IF([test ! -v "$check_ucx_dir"],
+            AS_IF([test -v "check_ucx_dir"],
             [
                 AC_MSG_RESULT([UCX dir: $check_ucx_dir])
                 AC_SUBST(UCX_CPPFLAGS, "-I$check_ucx_dir/include/")
             ])
 
-            AS_IF([test ! -v "$check_ucx_libdir"],
+            AS_IF([test -v "check_ucx_libdir"],
             [
                 AC_SUBST(UCX_LDFLAGS, "-L$check_ucx_libdir")
             ])
