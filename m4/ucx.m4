@@ -27,7 +27,7 @@ AS_IF([test "x$ucx_checked" != "xyes"],[
             LDFLAGS="-L$check_ucx_libdir $save_LDFLAGS"
         ])
 
-        AS_IF([test ! -v check_ucx_dir -a -v HPCX_UCX_DIR],
+        AS_IF([test "x$check_ucx_dir" = "x" -a "x$HPCX_UCX_DIR" != "x"],
         [
             check_ucx_dir="$HPCX_UCX_DIR"
             check_ucx_libdir="$HPCX_UCX_DIR/lib"
@@ -57,13 +57,13 @@ AS_IF([test "x$ucx_checked" != "xyes"],[
 
         AS_IF([test "x$ucx_happy" = "xyes"],
         [
-            AS_IF([test ! -v "$check_ucx_dir"],
+            AS_IF([test "x$check_ucx_dir" != "x"],
             [
                 AC_MSG_RESULT([UCX dir: $check_ucx_dir])
                 AC_SUBST(UCX_CPPFLAGS, "-I$check_ucx_dir/include/")
             ])
 
-            AS_IF([test ! -v "$check_ucx_libdir"],
+            AS_IF([test "x$check_ucx_libdir" != "x"],
             [
                 AC_SUBST(UCX_LDFLAGS, "-L$check_ucx_libdir")
             ])

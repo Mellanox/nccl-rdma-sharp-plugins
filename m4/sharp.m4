@@ -27,7 +27,7 @@ AS_IF([test "x$sharp_checked" != "xyes"],[
             LDFLAGS="-L$check_sharp_libdir $save_LDFLAGS"
         ])
 
-        AS_IF([test ! -v check_sharp_dir -a -v HPCX_SHARP_DIR],
+        AS_IF([test "x$check_sharp_dir" = "x" -a "x$HPCX_SHARP_DIR" != "x"],
         [
             check_sharp_dir="$HPCX_SHARP_DIR"
             check_sharp_libdir="$HPCX_SHARP_DIR/lib"
@@ -35,7 +35,7 @@ AS_IF([test "x$sharp_checked" != "xyes"],[
             LDFLAGS="-L$check_sharp_libdir $save_LDFLAGS"
         ])
 
-        AS_IF([test ! -v check_sharp_dir -a -d "/opt/mellanox/sharp/"],
+        AS_IF([test "x$check_sharp_dir" = "x" -a -d "/opt/mellanox/sharp/"],
         [
             check_sharp_dir="/opt/mellanox/sharp/"
             check_sharp_libdir="/opt/mellanox/sharp/lib"
@@ -66,13 +66,13 @@ AS_IF([test "x$sharp_checked" != "xyes"],[
 
         AS_IF([test "x$sharp_happy" = "xyes"],
         [
-            AS_IF([test ! -v "$check_sharp_dir"],
+            AS_IF([test "x$check_sharp_dir" != "x"],
             [
                 AC_MSG_RESULT([SHARP dir: $check_sharp_dir])
                 AC_SUBST(SHARP_CPPFLAGS, "-I$check_sharp_dir/include/")
             ])
 
-            AS_IF([test ! -v "$check_sharp_libdir"],
+            AS_IF([test "x$check_sharp_libdir" != "x"],
             [
                 AC_SUBST(SHARP_LDFLAGS, "-L$check_sharp_libdir")
             ])
