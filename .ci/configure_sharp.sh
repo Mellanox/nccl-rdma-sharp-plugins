@@ -46,6 +46,7 @@ fi
 
 CONFIGURE_SHARP_TMP_DIR="${NFS_WORKSPACE}/configure_sharp_$$"
 mkdir -p "${CONFIGURE_SHARP_TMP_DIR}"
+chmod o+w "${CONFIGURE_SHARP_TMP_DIR}"
 
 export SHARP_CONF="${CONFIGURE_SHARP_TMP_DIR}"
 export SHARP_INI_FILE="${SHARP_CONF}/sharp_manager.ini"
