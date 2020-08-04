@@ -480,32 +480,21 @@ ncclResult_t nccl_ucx_regmr(void* comm, void* data, int size, int type, void** m
   size_t               rkey_buf_size;
   void                 *rkey_buf;
   
+  NCCLCHECK(ncclIbMalloc((void**)&mh, sizeof(ucx_mhandle_t)));
   reg_addr = addr & (~(REG_ALIGN - 1));
   reg_size = addr + size - reg_addr;
   reg_size = ROUNDUP(reg_size, REG_ALIGN);
 
-  mh = (ucx_mhandle_t*)malloc(sizeof(ucx_mhandle_t));
-  if (mh == NULL) {
-    return ncclSystemError;
-  }
-
-#if UCP_API_VERSION >= UCP_VERSION(1, 10)
-  if (type == NCCL_PTR_CUDA) {
-    mh->mem_type = UCS_MEMORY_TYPE_CUDA;
-  } else {
-    mh->mem_type = UCS_MEMORY_TYPE_HOST;
-  }
-  mmap_params.field_mask  = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
-                            UCP_MEM_MAP_PARAM_FIELD_LENGTH |
-                            UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE; 
-  mmap_params.memory_type = mh->mem_type;
-#else
-  mh->mem_type = type;
   mmap_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
                            UCP_MEM_MAP_PARAM_FIELD_LENGTH; 
-#endif
   mmap_params.address    = (void*)reg_addr;
   mmap_params.length     = reg_size;  
+  mh->mem_type = type;
+#if UCP_API_VERSION >= UCP_VERSION(1, 10)
+  mh->mem_type = (type == NCCL_PTR_HOST)? UCS_MEMORY_TYPE_HOST: UCS_MEMORY_TYPE_CUDA;
+  mmap_params.field_mask  |= UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE; 
+  mmap_params.memory_type = mh->mem_type;
+#endif
 
   UCXCHECK(ucp_mem_map(ctx->ucp_ctx, &mmap_params, &mh->ucp_memh));
   if (ctx->gpuFlush.enabled) {

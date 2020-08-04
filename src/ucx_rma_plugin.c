@@ -573,23 +573,18 @@ ncclResult_t nccl_ucx_rma_regmr(void* comm, void* data, int size, int type,
   reg_addr = addr & (~(REG_ALIGN - 1));
   reg_size = addr + size - reg_addr;
   reg_size = ROUNDUP(reg_size, REG_ALIGN);
-#if UCP_API_VERSION >= UCP_VERSION(1, 10)
-  if (type == NCCL_PTR_CUDA) {
-    mh->mem_type = UCS_MEMORY_TYPE_CUDA;
-  } else {
-    mh->mem_type = UCS_MEMORY_TYPE_HOST;
-  }
-  mmap_params.field_mask  = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
-                            UCP_MEM_MAP_PARAM_FIELD_LENGTH |
-                            UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE;
-  mmap_params.memory_type = mh->mem_type;
-#else
-  mh->mem_type = type;
-  mmap_params.field_mask  = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
-                            UCP_MEM_MAP_PARAM_FIELD_LENGTH;
-#endif
+
+  mmap_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
+                           UCP_MEM_MAP_PARAM_FIELD_LENGTH; 
   mmap_params.address    = (void*)reg_addr;
-  mmap_params.length     = reg_size;
+  mmap_params.length     = reg_size;  
+  mh->mem_type = type;
+#if UCP_API_VERSION >= UCP_VERSION(1, 10)
+  mh->mem_type = (type == NCCL_PTR_HOST)? UCS_MEMORY_TYPE_HOST: UCS_MEMORY_TYPE_CUDA;
+  mmap_params.field_mask  |= UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE; 
+  mmap_params.memory_type = mh->mem_type;
+#endif
+
   UCXCHECK(ucp_mem_map(ctx->ctx, &mmap_params, &mh->ucp_memh));
   UCXCHECK(ucp_rkey_pack(ctx->ctx, mh->ucp_memh, &rkey_buf, &mh->rkey_buf.rkey_buf_size));
   if (mh->rkey_buf.rkey_buf_size > MAX_UCX_RKEY_BUF_SIZE) {
@@ -813,20 +808,16 @@ ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size,
   req = &(comm->super.reqs[req_id]);
   req->size = size;
 
-#if UCP_API_VERSION >= UCP_VERSION(1, 10)
-  req_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-                           UCP_OP_ATTR_FIELD_REQUEST  |
-                           UCP_OP_ATTR_FIELD_USER_DATA |
-                           UCP_OP_ATTR_FIELD_MEMORY_TYPE;
-  req_param.memory_type  = mh->mem_type;
-#else
   req_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
                            UCP_OP_ATTR_FIELD_REQUEST  |
                            UCP_OP_ATTR_FIELD_USER_DATA;
-#endif
   req_param.cb.send      = nccl_ucx_rma_put_isend_cb;
   req_param.user_data    = req;
   req_param.request      = &req->used;
+#if UCP_API_VERSION >= UCP_VERSION(1,10)
+  req_param.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+  req_param.memory_type  =  mh->mem_type;
+#endif
   
   st  = ucp_put_nbx(comm->ep, data, size, slot->addr,
                     comm->rkeys[*rkey_index].rkey,
