@@ -56,6 +56,7 @@ typedef struct ucx_rma_mhandle {
   ucp_mem_h               ucp_memh;
   ucp_rkey_h              rkey;
   nccl_ucx_rma_rkey_buf_t rkey_buf;
+  int                     mem_type;
 } ucx_rma_mhandle_t;
 
 struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
@@ -558,15 +559,6 @@ ncclResult_t nccl_ucx_rma_regmr(void* comm, void* data, int size, int type,
   void                 *rkey_buf;
   int                  i;
   
-  reg_addr = addr & (~(REG_ALIGN - 1));
-  reg_size = addr + size - reg_addr;
-  reg_size = ROUNDUP(reg_size, REG_ALIGN);
-
-  mmap_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
-                           UCP_MEM_MAP_PARAM_FIELD_LENGTH; 
-  mmap_params.address    = (void*)reg_addr;
-  mmap_params.length     = reg_size;
-  
   for (i = 0; i < NCCL_UCX_RMA_MAX_MHANDLES; i++) {
     if (ctx->mh[i] == NULL) {
       break;
@@ -578,6 +570,21 @@ ncclResult_t nccl_ucx_rma_regmr(void* comm, void* data, int size, int type,
   }
 
   NCCLCHECK(ncclIbMalloc((void**)&mh, sizeof(ucx_rma_mhandle_t)));
+  reg_addr = addr & (~(REG_ALIGN - 1));
+  reg_size = addr + size - reg_addr;
+  reg_size = ROUNDUP(reg_size, REG_ALIGN);
+
+  mmap_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
+                           UCP_MEM_MAP_PARAM_FIELD_LENGTH; 
+  mmap_params.address    = (void*)reg_addr;
+  mmap_params.length     = reg_size;  
+  mh->mem_type = type;
+#if UCP_API_VERSION >= UCP_VERSION(1, 10)
+  mh->mem_type = (type == NCCL_PTR_HOST)? UCS_MEMORY_TYPE_HOST: UCS_MEMORY_TYPE_CUDA;
+  mmap_params.field_mask  |= UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE; 
+  mmap_params.memory_type = mh->mem_type;
+#endif
+
   UCXCHECK(ucp_mem_map(ctx->ctx, &mmap_params, &mh->ucp_memh));
   UCXCHECK(ucp_rkey_pack(ctx->ctx, mh->ucp_memh, &rkey_buf, &mh->rkey_buf.rkey_buf_size));
   if (mh->rkey_buf.rkey_buf_size > MAX_UCX_RKEY_BUF_SIZE) {
@@ -767,6 +774,7 @@ ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size,
                                 void *mhandle, void **request)
 {
   nccl_ucx_rma_send_comm_t     *comm = (nccl_ucx_rma_send_comm_t*)send_comm;
+  ucx_rma_mhandle_t            *mh   = (ucx_rma_mhandle_t*)mhandle;
   volatile ucx_rma_send_fifo_t *slot;
   volatile uint32_t            *ready_ptr;
   volatile int                 *rkey_id;
@@ -806,6 +814,10 @@ ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size,
   req_param.cb.send      = nccl_ucx_rma_put_isend_cb;
   req_param.user_data    = req;
   req_param.request      = &req->used;
+#if UCP_API_VERSION >= UCP_VERSION(1,10)
+  req_param.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+  req_param.memory_type  =  mh->mem_type;
+#endif
   
   st  = ucp_put_nbx(comm->ep, data, size, slot->addr,
                     comm->rkeys[*rkey_index].rkey,
@@ -1021,7 +1033,7 @@ ncclResult_t nccl_ucx_rma_close_recv(void *recv_comm)
   nccl_ucx_rma_recv_comm_t *comm = (nccl_ucx_rma_recv_comm_t*)recv_comm;
   void *close_req;
   int debug = 1;
-  int close=1;
+  int close = 1;
 
   if (recv_comm) {
     ucp_rkey_destroy(comm->rem_fifo.rkey);
@@ -1071,4 +1083,3 @@ ncclNet_t ucxRmaPlugin = {
   nccl_ucx_rma_close_recv,
   nccl_ucx_rma_close_listen
 };
-
