@@ -62,7 +62,6 @@ ncclResult_t pluginInit(ncclDebugLogger_t logFunction)
 {
   pluginLogFunction = logFunction;
   p2p_plugin = NCCL_P2P_IB;
-
   const char *plugin_path = get_plugin_lib_path();
   if (plugin_path != NULL) {
     INFO(NCCL_INIT|NCCL_NET, "Plugin Path : %s", plugin_path);;
@@ -77,7 +76,7 @@ ncclResult_t pluginInit(ncclDebugLogger_t logFunction)
     else if (!strcasecmp(p2p_layer, "ucx_rma")) p2p_plugin = NCCL_P2P_UCX_RMA;
 #endif
     else {
-      WARN("Invalid value %s for NCCL_PLUGIN_P2P, using default.", p2p_layer);
+      WARN("Invalid value %s for NCCL_PLUGIN_P2P, using default", p2p_layer);
     }
   }
   switch (p2p_plugin) {
@@ -94,7 +93,6 @@ ncclResult_t pluginInit(ncclDebugLogger_t logFunction)
 #endif
   }
   INFO(NCCL_INIT|NCCL_NET, "P2P plugin %s", NCCL_PLUGIN_SYMBOL.name);
-
 
   return NCCL_PLUGIN_SYMBOL.init(logFunction);
 }
