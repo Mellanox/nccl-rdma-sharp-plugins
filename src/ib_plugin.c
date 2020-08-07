@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2020, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -41,6 +41,7 @@ NCCL_PARAM(IbRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbSl, "IB_SL", 0);
 NCCL_PARAM(IbTc, "IB_TC", 0);
 NCCL_PARAM(IbPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 0);
+NCCL_PARAM(IbArThreshold, "IB_AR_THRESHOLD", 8192);
 
 pthread_t ncclIbAsyncThread;
 static void* ncclIbAsyncThreadMain(void* args) {
@@ -189,7 +190,7 @@ ncclResult_t ncclIbCreateQp(uint8_t ib_port, struct ncclIbVerbs* verbs, int acce
   qpInitAttr.send_cq = verbs->cq;
   qpInitAttr.recv_cq = verbs->cq;
   qpInitAttr.qp_type = IBV_QPT_RC;
-  qpInitAttr.cap.max_send_wr = MAX_REQUESTS;
+  qpInitAttr.cap.max_send_wr = 2 * MAX_REQUESTS;
   qpInitAttr.cap.max_recv_wr = MAX_REQUESTS;
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
@@ -496,6 +497,10 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, void* mhandle, vo
   wr.opcode = IBV_WR_SEND;
   wr.send_flags = IBV_SEND_SIGNALED;
 
+  int useAr = 0;
+  if (size > ncclParamIbArThreshold()) {
+    useAr = 1;
+  }
 #if USE_RDMA_WRITE
   __sync_synchronize(); // order the readyPtr load against rkey load below
   // Sanity checks to catch user collective call count/size mismatches
@@ -505,7 +510,7 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, void* mhandle, vo
         size, slot->size, slot->addr, slot->rkey, slot->seq, comm->fifoHead);
     return ncclInternalError;
   }
-  wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+  wr.opcode = useAr ? IBV_WR_RDMA_WRITE : IBV_WR_RDMA_WRITE_WITH_IMM;
   wr.wr.rdma.remote_addr = slot->addr;
   wr.wr.rdma.rkey = slot->rkey;
   wr.imm_data = size; // Send the message size via imm_data
@@ -520,6 +525,18 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, void* mhandle, vo
 
   struct ibv_send_wr* bad_wr;
   NCCLCHECK(wrap_ibv_post_send(comm->qp, &wr, &bad_wr));
+#if USE_RDMA_WRITE
+  // When using adaptive routing, send the bulk of the data first as an
+  // RDMA_WRITE, then a 0-byte RDMA_WRITE_WITH_IMM to trigger a remote
+  // completion.
+  if (useAr) {
+    wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+    wr.sg_list = NULL;
+    wr.num_sge = 0;
+    wr.send_flags &= ~IBV_SEND_SIGNALED;
+    NCCLCHECK(wrap_ibv_post_send(comm->qp, &wr, &bad_wr));
+  }
+#endif
   *request = req;
   return ncclSuccess;
 }
