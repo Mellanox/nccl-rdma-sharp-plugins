@@ -59,9 +59,6 @@ typedef struct ucx_rma_mhandle {
   int                     mem_type;
 } ucx_rma_mhandle_t;
 
-struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
-struct userIbDev userIbDevs[MAX_IB_DEVS];
-
 ncclResult_t nccl_ucx_rma_devices(int* ndev) {
   *ndev = ncclNIbDevs;
   return ncclSuccess;
@@ -104,7 +101,8 @@ typedef struct ucx_gpu_flush {
 
 enum {
   UCX_RMA_REQ_TYPE_SEND,
-  UCX_RMA_REQ_TYPE_RECV
+  UCX_RMA_REQ_TYPE_RECV,
+  UCX_RMA_REQ_TYPE_FLUSH,
 };
 
 #define MAX_UCX_REQ_SIZE 256
@@ -189,6 +187,8 @@ static ncclResult_t get_socket_addr(union socketAddress *addr)
 typedef struct nccl_ucx_am_request {
   nccl_ucx_rma_request_t *req;
 } nccl_ucx_am_request_t;
+
+typedef nccl_ucx_am_request_t nccl_ucx_flush_request_t;
 
 static ncclResult_t nccl_ucx_rma_init_ucp(int dev, ucp_context_h *ctx)
 {
@@ -293,7 +293,7 @@ static ncclResult_t nccl_ucx_free_worker(ucp_worker_h worker)
         ep = workers[i].eps;
         while(ep) {
           cur = ep;
-          NCCLCHECK(socketReceive(ep->fd, &dummy, sizeof(int)));
+          NCCLCHECK(socketRecv(ep->fd, &dummy, sizeof(int)));
           ep = ep->next;
           close(cur->fd);
           free(cur);
@@ -469,7 +469,7 @@ static ncclResult_t nccl_ucx_rma_init_ep(int fd, ucp_worker_h worker, ucp_ep_h *
   void            *peer_addr;
 
   if (blocking) {
-    NCCLCHECK(socketReceive(fd, &peer_addr_len, sizeof(size_t)));
+    NCCLCHECK(socketRecv(fd, &peer_addr_len, sizeof(size_t)));
   } else {
     NCCLCHECK(socketProgress(NCCL_SOCKET_RECV, fd, &peer_addr_len,
                             sizeof(size_t), &bytes));
@@ -481,7 +481,7 @@ static ncclResult_t nccl_ucx_rma_init_ep(int fd, ucp_worker_h worker, ucp_ep_h *
                          sizeof(size_t), &bytes));
   }
   peer_addr = alloca(peer_addr_len);
-  NCCLCHECK(socketReceive(fd, peer_addr, peer_addr_len));
+  NCCLCHECK(socketRecv(fd, peer_addr, peer_addr_len));
 
   ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
   ep_params.address    = peer_addr;
@@ -509,15 +509,15 @@ ncclResult_t nccl_ucx_rma_accept(void *listen_comm, void **recv_comm)
 
   NCCLCHECK(nccl_ucx_rma_init_ep(comm->super.fd, comm->super.worker, &comm->ep, 1));
   NCCLCHECK(nccl_ucx_add_ep(comm->super.worker, comm->super.fd));
-  NCCLCHECK(socketReceive(comm->super.fd, &rkey_buf_size, sizeof(size_t)));
+  NCCLCHECK(socketRecv(comm->super.fd, &rkey_buf_size, sizeof(size_t)));
 
   rkey_buf = malloc(rkey_buf_size);
   if (rkey_buf == NULL) {
     return ncclSystemError;
   }
-  NCCLCHECK(socketReceive(comm->super.fd, rkey_buf, rkey_buf_size));
-  NCCLCHECK(socketReceive(comm->super.fd, &comm->rem_fifo.addr, sizeof(uint64_t)));
-  NCCLCHECK(socketReceive(comm->super.fd, &comm->rem_am_id, sizeof(int)));
+  NCCLCHECK(socketRecv(comm->super.fd, rkey_buf, rkey_buf_size));
+  NCCLCHECK(socketRecv(comm->super.fd, &comm->rem_fifo.addr, sizeof(uint64_t)));
+  NCCLCHECK(socketRecv(comm->super.fd, &comm->rem_am_id, sizeof(int)));
   UCXCHECK(ucp_ep_rkey_unpack(comm->ep, rkey_buf, &comm->rem_fifo.rkey));
   free(rkey_buf);
 
@@ -650,8 +650,16 @@ ncclResult_t ucx_rma_get_request(nccl_ucx_rma_request_t* reqs, int* req_id)
   return ncclInternalError;
 }
 
-static void nccl_ucx_rma_flush_cb(void *request, ucs_status_t status)
+static void nccl_ucx_rma_ep_flush_cb(void *request, ucs_status_t status)
 {
+  return;
+}
+
+static void nccl_ucx_rma_gdr_flush_cb(void *request, ucs_status_t status)
+{
+  nccl_ucx_flush_request_t *req = (nccl_ucx_flush_request_t*)request;
+
+  req->req->done = NCCL_UCX_RMA_REQUEST_DONE;
   return;
 }
 
@@ -682,12 +690,12 @@ static ncclResult_t nccl_ucx_rma_send_check(nccl_ucx_rma_send_comm_t *comm)
     if (comm->ep == NULL) {
       return ncclSuccess;
     }
-    NCCLCHECK(socketReceive(comm->super.fd, &comm->rem_am_id, sizeof(int)));
+    NCCLCHECK(socketRecv(comm->super.fd, &comm->rem_am_id, sizeof(int)));
     comm->super.ready = NCCL_UCX_RMA_SCOMM_EP_CREATED;
   }
 
   if (comm->super.ready == NCCL_UCX_RMA_SCOMM_EP_CREATED) {
-    comm->super.check_req = ucp_ep_flush_nb(comm->ep, 0, nccl_ucx_rma_flush_cb);
+    comm->super.check_req = ucp_ep_flush_nb(comm->ep, 0, nccl_ucx_rma_ep_flush_cb);
 
   if (comm->super.check_req == NULL) {
       comm->super.ready = NCCL_UCX_RMA_SCOMM_READY;
@@ -815,8 +823,10 @@ ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size,
   req_param.user_data    = req;
   req_param.request      = &req->used;
 #if UCP_API_VERSION >= UCP_VERSION(1,10)
-  req_param.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMORY_TYPE;
-  req_param.memory_type  =  mh->mem_type;
+  if (mh) {
+    req_param.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+    req_param.memory_type  =  mh->mem_type;
+  }
 #endif
   
   st  = ucp_put_nbx(comm->ep, data, size, slot->addr,
@@ -935,28 +945,36 @@ ncclResult_t nccl_ucx_rma_irecv(void *recv_comm, void *data, int size,
   return ncclSuccess;
 }
 
-ncclResult_t nccl_ucx_rma_flush(void* recv_comm, void* data, int size,
-                                void* mhandle)
+ncclResult_t nccl_ucx_rma_iflush(void* recv_comm, void* data, int size,
+                                void* mhandle, void ** request)
 {
   nccl_ucx_rma_recv_comm_t *comm = (nccl_ucx_rma_recv_comm_t*)recv_comm;
   ucx_rma_mhandle_t        *mh   = (ucx_rma_mhandle_t*)mhandle;
   nccl_ucx_rma_request_t   *req;
+  int                      req_id;
 
+  *request = NULL;
   if ((comm->super.gpuFlush.enabled == 0) || (size == 0)) {
     return ncclSuccess;
   }
 
-  req = ucp_get_nb(comm->super.gpuFlush.flush_ep, &comm->super.gpuFlush.hostMem, 1,
-                   (uint64_t)data, mh->rkey, nccl_ucx_rma_flush_cb);
-  if (UCS_PTR_IS_ERR(req)) {
+  NCCLCHECK(ucx_rma_get_request(comm->super.reqs, &req_id));
+  req = &comm->super.reqs[req_id];
+
+  req->st = ucp_get_nb(comm->super.gpuFlush.flush_ep, &comm->super.gpuFlush.hostMem, 1,
+                   (uint64_t)data, mh->rkey, nccl_ucx_rma_gdr_flush_cb);
+  if (UCS_PTR_IS_ERR(req->st)) {
     WARN("ucx_flush: unable to read data (%s)", ucs_status_string(UCS_PTR_STATUS(req)));
     return ncclSystemError;
-  } else if (req != NULL) {
-    while(ucp_request_check_status(req) == UCS_INPROGRESS) {
-       ucp_worker_progress(comm->super.worker);
-    }
-    ucp_request_free(req);
+  } else if (req->st == NULL) {
+    return ncclSuccess;
   }
+  nccl_ucx_flush_request_t *flush_req = (nccl_ucx_flush_request_t*)req->st;
+  flush_req->req = req;
+
+  req->worker = comm->super.worker;
+  req->type   = UCX_RMA_REQ_TYPE_FLUSH;
+  *request    = req;
 
   return ncclSuccess;
 }
@@ -1077,7 +1095,7 @@ ncclNet_t ucxRmaPlugin = {
   nccl_ucx_rma_deregmr,
   nccl_ucx_rma_isend,
   nccl_ucx_rma_irecv,
-  nccl_ucx_rma_flush,
+  nccl_ucx_rma_iflush,
   nccl_ucx_rma_test,
   nccl_ucx_rma_close_send,
   nccl_ucx_rma_close_recv,
