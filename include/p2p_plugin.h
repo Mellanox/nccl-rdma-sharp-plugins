@@ -18,12 +18,31 @@
 #include "socket.h"
 #include "utils.h"
 
+#define MAXNAMESIZE 64
+#define MAX_REQUESTS NCCL_NET_MAX_REQUESTS
+#define IB_DEVICE_SYSFS_FMT "/sys/class/infiniband/%s/device/%s"
+
 typedef enum nccl_p2p_plugin {
   NCCL_P2P_IB,
   NCCL_P2P_UCX,
   NCCL_P2P_UCX_RMA,
   NCCL_P2P_LAST
 } nccl_p2p_plugin_t;
+
+struct ncclIbRequest {
+  int used;
+  int type;
+  struct ncclIbVerbs* verbs;
+  int events;
+  int size;
+};
+
+struct ncclIbVerbs {
+  struct ibv_pd* pd;
+  struct ibv_cq* cq;
+  uint64_t pad[2];
+  struct ncclIbRequest reqs[MAX_REQUESTS];
+};
 
 typedef struct ncclIbDev {
   int      device;
@@ -33,12 +52,22 @@ typedef struct ncclIbDev {
   uint8_t  isSharpDev;
   int      speed;
   struct   ibv_context* context;
+  struct   ncclIbVerbs verbs;
   char     devName[MAXNAMESIZE];
   char     *pciPath;
   int      realPort;
   int      maxQp;
 } nccl_ib_dev_t;
 
+#define MAX_IB_PORT 15
+struct userIbDev {
+  char devName[MAXNAMESIZE];
+  uint16_t port_en;
+};
+
+#define MAX_IB_DEVS 16
+struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
+struct ncclIbDev userIbDevs[MAX_IB_DEVS];
 /* Detect whether GDR can work on a given NIC with the current CUDA device
  * Returns :
  * ncclSuccess : GDR works

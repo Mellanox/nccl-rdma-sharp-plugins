@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2020, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -23,7 +23,13 @@
 extern ncclNet_t NCCL_PLUGIN_SYMBOL;
 int ncclNSharpDevs = -1;
 
+enum ncclSharpRequestType {
+  NCCL_SHARP_REQ_SHARP_COLL,
+  NCCL_SHARP_REQ_IFLUSH,
+};
+
 struct ncclSharpRequest {
+  int requestType;
   void *sharpRequest;
   int  size;
   int  used;
@@ -95,7 +101,7 @@ static __inline__ enum sharp_reduce_op opConvert(ncclRedOp_t op) {
 int ncclSharpAllGather(void *context, void *buf, int len) {
   struct ncclSharpCollComm* cComm = (struct ncclSharpCollComm*)context;
   nccl_p2p_plugin_t p2p_plugin;
-  void* rMhandle, *sMhandle;
+  void* rMhandle = NULL, *sMhandle = NULL;
 
   p2p_plugin = nccl_p2p_get_plugin_type();
   if (p2p_plugin != NCCL_P2P_UCX) {
@@ -388,20 +394,39 @@ ncclResult_t ncclSharpIallreduce(void* collComm, void* sendData, void* recvData,
   req->sharpRequest = (void *) 0xabababab;
   req->size =  count * dt_size;
 #endif
-
+  req->requestType = NCCL_SHARP_REQ_SHARP_COLL;
   *request = req;
   return ncclSuccess;
 }
 
-ncclResult_t ncclSharpFlush(void* collComm, void* data, int size, void* mhandle) {
+ncclResult_t ncclSharpIflush(void* collComm, void* data, int size, void* mhandle, void **request) {
   struct ncclSharpCollComm *cComm = (struct ncclSharpCollComm*)collComm;
   struct ncclSharpMemHandle *mh = (struct ncclSharpMemHandle *)mhandle;
+  struct ncclSharpRequest* req;
 
-  return NCCL_PLUGIN_SYMBOL.flush(cComm->recvComm, data, size, mh->ncclIbMr);
+  NCCLCHECK(ncclSharpGetRequest(cComm->reqs, &req));
+  req->requestType = NCCL_SHARP_REQ_IFLUSH;
+  NCCL_PLUGIN_SYMBOL.iflush(cComm->recvComm, data, size, mh->ncclIbMr, &req->sharpRequest);
+  if (!req->sharpRequest) {
+    *request = NULL;
+     req->used = 0;
+     return ncclSuccess;
+   }
+
+  *request = req;
+   return ncclSuccess;
 }
 
 ncclResult_t ncclSharpTest(void* request, int* done, int* size) {
   struct ncclSharpRequest* req = (struct ncclSharpRequest*)request;
+
+  if (req->requestType == NCCL_SHARP_REQ_IFLUSH) {
+    NCCL_PLUGIN_SYMBOL.test(req->sharpRequest, done, size);
+    if (*done == 1) {
+      req->used = 0;
+    }
+    return ncclSuccess;
+  }
 
 #if BLOCKING==0
   *done = sharp_coll_req_test(req->sharpRequest);
@@ -456,7 +481,7 @@ ncclCollNet_t NCCL_COLLNET_PLUGIN_SYMBOL = {
   ncclSharpRegMr,
   ncclSharpDeregMr,
   ncclSharpIallreduce,
-  ncclSharpFlush,
+  ncclSharpIflush,
   ncclSharpTest,
   ncclSharpCloseColl,
   ncclSharpCloseListen

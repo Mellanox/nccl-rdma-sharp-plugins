@@ -11,11 +11,11 @@
 #include <cuda_fp16.h>
 
 #define NCCL_MAJOR 2
-#define NCCL_MINOR 6
-#define NCCL_PATCH 0
+#define NCCL_MINOR 8
+#define NCCL_PATCH 3
 #define NCCL_SUFFIX "a0"
 
-#define NCCL_VERSION_CODE 2600
+#define NCCL_VERSION_CODE 2831
 #define NCCL_VERSION(X,Y,Z) ((X) * 1000 + (Y) * 100 + (Z))
 
 #ifdef __cplusplus
@@ -221,6 +221,40 @@ ncclResult_t pncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcou
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 
 /*
+ * Send
+ *
+ * Send data from sendbuff to rank peer.
+ *
+ * Rank peer needs to call ncclRecv with the same datatype and the same count from this
+ * rank.
+ *
+ * This operation is blocking for the GPU. If multiple ncclSend and ncclRecv operations
+ * need to progress concurrently to complete, they must be fused within a ncclGroupStart/
+ * ncclGroupEnd section.
+ */
+ncclResult_t  ncclSend(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
+    ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pncclSend(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
+    ncclComm_t comm, cudaStream_t stream);
+
+/*
+ * Receive
+ *
+ * Receive data from rank peer into recvbuff.
+ *
+ * Rank peer needs to call ncclSend with the same datatype and the same count to this
+ * rank.
+ *
+ * This operation is blocking for the GPU. If multiple ncclSend and ncclRecv operations
+ * need to progress concurrently to complete, they must be fused within a ncclGroupStart/
+ * ncclGroupEnd section.
+ */
+ncclResult_t pncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
+    ncclComm_t comm, cudaStream_t stream);
+ncclResult_t  ncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
+    ncclComm_t comm, cudaStream_t stream);
+
+/*
  * Group semantics
  *
  * When managing multiple GPUs from a single thread, and since NCCL collective
@@ -235,14 +269,19 @@ ncclResult_t pncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcou
  * the operation is effectively done.
  *
  * Both collective communication and ncclCommInitRank can be used in conjunction
- * of ncclGroupStart/ncclGroupEnd.
+ * of ncclGroupStart/ncclGroupEnd, but not together.
+ *
+ * Group semantics also allow to fuse multiple operations on the same device
+ * to improve performance (for aggregated collective calls), or to permit
+ * concurrent progress of multiple send/receive operations.
  */
 
 /*
  * Group Start
  *
- * Start a group call. All subsequent calls to NCCL may not block due to
- * inter-CPU synchronization.
+ * Start a group call. All calls to NCCL until ncclGroupEnd will be fused into
+ * a single NCCL operation. Nothing will be started on the CUDA stream until
+ * ncclGroupEnd.
  */
 ncclResult_t  ncclGroupStart();
 ncclResult_t pncclGroupStart();
@@ -250,8 +289,9 @@ ncclResult_t pncclGroupStart();
 /*
  * Group End
  *
- * End a group call. Wait for all calls since ncclGroupStart to complete
- * before returning.
+ * End a group call. Start a fused NCCL operation consisting of all calls since
+ * ncclGroupStart. Operations on the CUDA stream depending on the NCCL operations
+ * need to be called after ncclGroupEnd.
  */
 ncclResult_t  ncclGroupEnd();
 ncclResult_t pncclGroupEnd();

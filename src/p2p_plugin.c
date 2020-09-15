@@ -266,7 +266,7 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
 #endif
       }
       line[1023] = '\0';
-      char addrline[1024];
+      char addrline[SOCKET_NAME_MAXLEN+1];
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s ; OOB %s:%s", line, ncclIbIfName, socketToString(&ncclIbIfAddr->sa, addrline));
     }
     *num_devs = ncclNIbDevs;
