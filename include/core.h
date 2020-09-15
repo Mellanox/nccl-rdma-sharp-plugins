@@ -13,11 +13,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define MAX_REQUESTS 128
-#define MAXNAMESIZE 64
-#define MAX_IB_DEVS 16
-#define IB_DEVICE_SYSFS_FMT "/sys/class/infiniband/%s/device/%s"
-
 #define MIN(a, b) ((a)<(b)?(a):(b))
 #define MAX(a, b) ((a)>(b)?(a):(b))
 
@@ -77,10 +72,5 @@
     goto label; \
   } \
 } while (0);
-
-struct userIbDev {
-  char devName[MAXNAMESIZE];
-  uint16_t port_en;
-};
 
 #endif // end include guard

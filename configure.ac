@@ -35,6 +35,7 @@ AC_SUBST([BUILD_TIME], [$(date +'%H:%M:%S')])
 
 # Checks for programs.
 AC_GNU_SOURCE
+AC_PROG_CC
 AC_PROG_CC_STDC
 AC_PROG_CXX
 AM_PROG_AS
@@ -49,9 +50,9 @@ AC_ARG_ENABLE([debug],AS_HELP_STRING([--enable-debug], [Enable extra debugging c
 
 if test $enable_debug = yes; then
 	AC_DEFINE([ENABLE_DEBUG], [1], [Enable debugging code])
-	CFLAGS="$CFLAGS -O0 -g3"
+	CFLAGS="$CFLAGS -O0 -g3 -Werror"
 else
-	CFLAGS="$CFLAGS -O3 -DNDEBUG"
+	CFLAGS="$CFLAGS -O3 -DNDEBUG -Werror"
 fi
 
 #check for cuda

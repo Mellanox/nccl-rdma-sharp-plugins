@@ -8,21 +8,21 @@
 #define NCCL_SOCKET_H_
 
 #include <sys/socket.h>
-#include <stdio.h>
-#include <string.h>
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include "stdbool.h"
 #include "utils.h"
 
 #define MAX_IFS 16
 #define MAX_IF_NAME_SIZE 16
-#define SLEEP_INT     1000  // sleep interval in usec
-#define RETRY_TIMES   2e4   // retry times before reporting a timeout (20 sec)
+#define SLEEP_INT            1000 // connection retry sleep interval in usec
+#define RETRY_REFUSED_TIMES   2e4 // connection refused retry times before reporting a timeout (20 sec)
+#define RETRY_TIMEDOUT_TIMES    3 // connection timed out retry times (each one can take 20s)
+#define SOCKET_NAME_MAXLEN (NI_MAXHOST+NI_MAXSERV)
 
 /* Common socket address storage structure for IPv4/IPv6 */
 union socketAddress {
@@ -44,7 +44,7 @@ static inline const char *socketToString(struct sockaddr *saddr, char *buf) {
   return buf;
 }
 
-static inline short socketToPort(struct sockaddr *saddr) {
+static inline uint16_t socketToPort(struct sockaddr *saddr) {
   return ntohs(saddr->sa_family == AF_INET ? ((struct sockaddr_in*)saddr)->sin_port : ((struct sockaddr_in6*)saddr)->sin6_port);
 }
 
@@ -55,6 +55,8 @@ static inline int envSocketFamily(void) {
   if (env == NULL)
     return family;
 
+  INFO(NCCL_ENV, "NCCL_SOCKET_FAMILY set by environment to %s", env);
+
   if (strcmp(env, "AF_INET") == 0)
     family = AF_INET;  // IPv4
   else if (strcmp(env, "AF_INET6") == 0)
@@ -62,11 +64,14 @@ static inline int envSocketFamily(void) {
   return family;
 }
 
-static int filterInterfaces(const char* prefixList, char* names, union socketAddress *addrs, int sock_family, int maxIfNameSize, int maxIfs) {
+static int findInterfacesWithPrefix(const char* prefixList, char* names, union socketAddress *addrs, int sock_family, int maxIfNameSize, int maxIfs) {
+#ifdef ENABLE_TRACE
+  char line[SOCKET_NAME_MAXLEN+1];
+#endif
   struct netIf userIfs[MAX_IFS];
-  int searchNot = prefixList && prefixList[0] == '^';
+  bool searchNot = prefixList && prefixList[0] == '^';
   if (searchNot) prefixList++;
-  int searchExact = prefixList && prefixList[0] == '=';
+  bool searchExact = prefixList && prefixList[0] == '=';
   if (searchExact) prefixList++;
   int nUserIfs = parseStringList(prefixList, userIfs, MAX_IFS);
 
@@ -100,9 +105,9 @@ static int filterInterfaces(const char* prefixList, char* names, union socketAdd
 
     // Check that this interface has not already been saved
     // getifaddrs() normal order appears to be; IPv4, IPv6 Global, IPv6 Link
-    int duplicate = 0;
+    bool duplicate = false;
     for (int i = 0; i < found; i++) {
-      if (strcmp(interface->ifa_name, names+i*maxIfNameSize) == 0) { duplicate = 1; break; }
+      if (strcmp(interface->ifa_name, names+i*maxIfNameSize) == 0) { duplicate = true; break; }
     }
 
     if (!duplicate) {
@@ -119,14 +124,96 @@ static int filterInterfaces(const char* prefixList, char* names, union socketAdd
   return found;
 }
 
-static ncclResult_t GetSocketAddrFromString(union socketAddress* ua, const char* ip_port_pair)  __attribute__((unused));
+static bool matchSubnet(struct ifaddrs local_if, union socketAddress* remote) {
+  /* Check family first */
+  int family = local_if.ifa_addr->sa_family;
+  if (family != remote->sa.sa_family) {
+    return false;
+  }
+
+  if (family == AF_INET) {
+    struct sockaddr_in* local_addr = (struct sockaddr_in*)(local_if.ifa_addr);
+    struct sockaddr_in* mask = (struct sockaddr_in*)(local_if.ifa_netmask);
+    struct sockaddr_in* remote_addr = &remote->sin;
+    struct in_addr local_subnet, remote_subnet;
+    local_subnet.s_addr = local_addr->sin_addr.s_addr & mask->sin_addr.s_addr;
+    remote_subnet.s_addr = remote_addr->sin_addr.s_addr & mask->sin_addr.s_addr;
+    return (local_subnet.s_addr ^ remote_subnet.s_addr) ? false : true;
+  } else if (family == AF_INET6) {
+    struct sockaddr_in6* local_addr = (struct sockaddr_in6*)(local_if.ifa_addr);
+    struct sockaddr_in6* mask = (struct sockaddr_in6*)(local_if.ifa_netmask);
+    struct sockaddr_in6 *remote_addr = &remote->sin6;
+    struct in6_addr *local_in6 = &local_addr->sin6_addr;
+    struct in6_addr *mask_in6 = &mask->sin6_addr;
+    struct in6_addr *remote_in6 = &remote_addr->sin6_addr;
+    bool same = true;
+    int len = 16;  //IPv6 address is 16 unsigned char
+    for (int c = 0; c < len; c++) {  //Network byte order is big-endian
+      char c1 = local_in6->s6_addr[c] & mask_in6->s6_addr[c];
+      char c2 = remote_in6->s6_addr[c] & mask_in6->s6_addr[c];
+      if (c1 ^ c2) {
+        same = false;
+        break;
+      }
+    }
+    // At last, we need to compare scope id
+    // Two Link-type addresses can have the same subnet address even though they are not in the same scope
+    // For Global type, this field is 0, so a comparison wouldn't matter
+    same &= (local_addr->sin6_scope_id == remote_addr->sin6_scope_id);
+    return same;
+  } else {
+    WARN("Net : Unsupported address family type");
+    return false;
+  }
+}
+
+static int findInterfaceMatchSubnet(char* ifNames, union socketAddress* localAddrs, union socketAddress* remoteAddr, int ifNameMaxSize, int maxIfs) {
+#ifdef ENABLE_TRACE
+  char line[SOCKET_NAME_MAXLEN+1];
+#endif
+  char line_a[SOCKET_NAME_MAXLEN+1];
+  int found = 0;
+  struct ifaddrs *interfaces, *interface;
+  getifaddrs(&interfaces);
+  for (interface = interfaces; interface && !found; interface = interface->ifa_next) {
+    if (interface->ifa_addr == NULL) continue;
+
+    /* We only support IPv4 & IPv6 */
+    int family = interface->ifa_addr->sa_family;
+    if (family != AF_INET && family != AF_INET6)
+      continue;
+
+    // check against user specified interfaces
+    if (!matchSubnet(*interface, remoteAddr)) {
+      continue;
+    }
+
+    // Store the local IP address
+    int salen = (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
+    memcpy(localAddrs+found, interface->ifa_addr, salen);
+
+    // Store the interface name
+    strncpy(ifNames+found*ifNameMaxSize, interface->ifa_name, ifNameMaxSize);
+
+    TRACE(NCCL_INIT|NCCL_NET,"NET : Found interface %s:%s in the same subnet as remote address %s", interface->ifa_name, socketToString(&(localAddrs[found].sa), line), socketToString(&(remoteAddr->sa), line_a));
+    found++;
+    if (found == maxIfs) break;
+  }
+
+  if (found == 0) {
+    WARN("Net : No interface found in the same subnet as remote address %s", socketToString(&(remoteAddr->sa), line_a));
+  }
+  freeifaddrs(interfaces);
+  return found;
+}
+
 static ncclResult_t GetSocketAddrFromString(union socketAddress* ua, const char* ip_port_pair) {
   if (!(ip_port_pair && strlen(ip_port_pair) > 1)) {
     WARN("Net : string is null");
     return ncclInvalidArgument;
   }
 
-  int ipv6 = ip_port_pair[0] == '[';
+  bool ipv6 = ip_port_pair[0] == '[';
   /* Construct the sockaddress structure */
   if (!ipv6) {
     struct netIf ni;
@@ -178,7 +265,7 @@ static ncclResult_t GetSocketAddrFromString(union socketAddress* ua, const char*
       WARN("Net : No valid [IPv6]:port pair found");
       return ncclInvalidArgument;
     }
-    int global_scope = (j == -1);     // If no % found, global scope; otherwise, link scope
+    bool global_scope = (j == -1 ? true : false);     // If no % found, global scope; otherwise, link scope
 
     char ip_str[NI_MAXHOST], port_str[NI_MAXSERV], if_name[IFNAMSIZ];
     memset(ip_str, '\0', sizeof(ip_str));
@@ -200,23 +287,37 @@ static ncclResult_t GetSocketAddrFromString(union socketAddress* ua, const char*
 }
 
 static int findInterfaces(char* ifNames, union socketAddress *ifAddrs, int ifNameMaxSize, int maxIfs) {
+  static int shownIfName = 0;
   int nIfs = 0;
   // Allow user to force the INET socket family selection
   int sock_family = envSocketFamily();
   // User specified interface
   char* env = getenv("NCCL_SOCKET_IFNAME");
   if (env && strlen(env) > 1) {
+    INFO(NCCL_ENV, "NCCL_SOCKET_IFNAME set by environment to %s", env);
     // Specified by user : find or fail
-    nIfs = filterInterfaces(env, ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
+    if (shownIfName++ == 0) INFO(NCCL_NET, "NCCL_SOCKET_IFNAME set to %s", env);
+    nIfs = findInterfacesWithPrefix(env, ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
   } else {
     // Try to automatically pick the right one
     // Start with IB
-    nIfs = filterInterfaces("ib", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
+    nIfs = findInterfacesWithPrefix("ib", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
+    // else see if we can get some hint from COMM ID
+    if (nIfs == 0) {
+      char* commId = getenv("NCCL_COMM_ID");
+      if (commId && strlen(commId) > 1) {
+	INFO(NCCL_ENV, "NCCL_COMM_ID set by environment to %s", commId);
+	// Try to find interface that is in the same subnet as the IP in comm id
+        union socketAddress idAddr;
+        GetSocketAddrFromString(&idAddr, commId);
+        nIfs = findInterfaceMatchSubnet(ifNames, ifAddrs, &idAddr, ifNameMaxSize, maxIfs);
+      }
+    }
     // Then look for anything else (but not docker or lo)
-    if (nIfs == 0) nIfs = filterInterfaces("^docker,lo", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
+    if (nIfs == 0) nIfs = findInterfacesWithPrefix("^docker,lo", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
     // Finally look for docker, then lo.
-    if (nIfs == 0) nIfs = filterInterfaces("docker", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
-    if (nIfs == 0) nIfs = filterInterfaces("lo", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
+    if (nIfs == 0) nIfs = findInterfacesWithPrefix("docker", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
+    if (nIfs == 0) nIfs = findInterfacesWithPrefix("lo", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
   }
   return nIfs;
 }
@@ -236,9 +337,10 @@ static ncclResult_t createListenSocket(int *fd, union socketAddress *localAddr) 
   if (socketToPort(&localAddr->sa)) {
     // Port is forced by env. Make sure we get the port.
     int opt = 1;
+#if defined(SO_REUSEPORT)
+    SYSCHECK(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)), "setsockopt");
+#else
     SYSCHECK(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)), "setsockopt");
-#ifdef SO_REUSEPORT /* no SO_REUSEPORT old linux versions */
-    SYSCHECK(setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)), "setsockopt");
 #endif
   }
 
@@ -250,7 +352,7 @@ static ncclResult_t createListenSocket(int *fd, union socketAddress *localAddr) 
   SYSCHECK(getsockname(sockfd, &localAddr->sa, &size), "getsockname");
 
 #ifdef ENABLE_TRACE
-  char line[1024];
+  char line[SOCKET_NAME_MAXLEN+1];
   TRACE(NCCL_INIT|NCCL_NET,"Listening on socket %s", socketToString(&localAddr->sa, line));
 #endif
 
@@ -265,6 +367,10 @@ static ncclResult_t createListenSocket(int *fd, union socketAddress *localAddr) 
 static ncclResult_t connectAddress(int* fd, union socketAddress* remoteAddr) {
   /* IPv4/IPv6 support */
   int family = remoteAddr->sa.sa_family;
+  if (family != AF_INET && family != AF_INET6) {
+    WARN("Error : connecting to address with family %d is neither AF_INET(%d) nor AF_INET6(%d)\n", family, AF_INET, AF_INET6);
+    return ncclInternalError;
+  }
   int salen = (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
 
   /* Connect to a hostname / port */
@@ -281,20 +387,22 @@ static ncclResult_t connectAddress(int* fd, union socketAddress* remoteAddr) {
     SYSCHECK(setsockopt(*fd, SOL_SOCKET, SO_SNDBUF, (char*)&bufsize, sizeof(int)), "setsockopt");
     SYSCHECK(setsockopt(*fd, SOL_SOCKET, SO_RCVBUF, (char*)&bufsize, sizeof(int)), "setsockopt");*/
 
-  char line[1024];
-#ifdef ENABLE_TRACE
+  char line[2048];
   TRACE(NCCL_INIT|NCCL_NET,"Connecting to socket %s", socketToString(&remoteAddr->sa, line));
-#endif
 
   int ret;
-  int retries = 0;
+  int timedout_retries = 0;
+  int refused_retries = 0;
 retry:
   SYSCHECKSYNC(connect(*fd, &remoteAddr->sa, salen), "connect", ret);
   if (ret == 0) return ncclSuccess;
-  if (errno == ECONNREFUSED && ++retries < RETRY_TIMES) {
-    INFO(NCCL_ALL,"Call to connect returned %s, retrying", strerror(errno)); \
+  if ((errno == ECONNREFUSED || errno == ETIMEDOUT)) {
+    if ((errno == ECONNREFUSED && ++refused_retries < RETRY_REFUSED_TIMES) ||
+        (errno == ETIMEDOUT && ++timedout_retries < RETRY_TIMEDOUT_TIMES)) {
+      if (refused_retries % 1000 == 0) INFO(NCCL_ALL,"Call to connect returned %s, retrying", strerror(errno));
     usleep(SLEEP_INT);
     goto retry;
+  }
   }
   WARN("Connect to %s failed : %s", socketToString(&remoteAddr->sa, line), strerror(errno));
   return ncclSystemError;
@@ -302,12 +410,12 @@ retry:
 
 #define NCCL_SOCKET_SEND 0
 #define NCCL_SOCKET_RECV 1
-static ncclResult_t socketProgress(int op, int fd, void* ptr, int size, int* offset) {
+static ncclResult_t socketProgressOpt(int op, int fd, void* ptr, int size, int* offset, int block) {
   int bytes = 0;
   char* data = (char*)ptr;
   do {
-    if (op == NCCL_SOCKET_RECV) bytes = recv(fd, data+(*offset), size-(*offset), MSG_DONTWAIT);
-    if (op == NCCL_SOCKET_SEND) bytes = send(fd, data+(*offset), size-(*offset), MSG_DONTWAIT);
+    if (op == NCCL_SOCKET_RECV) bytes = recv(fd, data+(*offset), size-(*offset), block ? 0 : MSG_DONTWAIT);
+    if (op == NCCL_SOCKET_SEND) bytes = send(fd, data+(*offset), size-(*offset), block ? 0 : MSG_DONTWAIT);
     if (op == NCCL_SOCKET_RECV && bytes == 0) {
       WARN("Net : Connection closed by remote peer");
       return ncclSystemError;
@@ -325,9 +433,13 @@ static ncclResult_t socketProgress(int op, int fd, void* ptr, int size, int* off
   return ncclSuccess;
 }
 
+static ncclResult_t socketProgress(int op, int fd, void* ptr, int size, int* offset) {
+  return socketProgressOpt(op, fd, ptr, size, offset, 0);
+}
+
 static ncclResult_t socketWait(int op, int fd, void* ptr, int size, int* offset) {
   while (*offset < size)
-    NCCLCHECK(socketProgress(op, fd, ptr, size, offset));
+    NCCLCHECK(socketProgressOpt(op, fd, ptr, size, offset, 1));
   return ncclSuccess;
 }
 
@@ -337,7 +449,7 @@ static ncclResult_t socketSend(int fd, void* ptr, int size) {
   return ncclSuccess;
 }
 
-static ncclResult_t socketReceive(int fd, void* ptr, int size) {
+static ncclResult_t socketRecv(int fd, void* ptr, int size) {
   int offset = 0;
   NCCLCHECK(socketWait(NCCL_SOCKET_RECV, fd, ptr, size, &offset));
   return ncclSuccess;
