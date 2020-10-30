@@ -36,6 +36,7 @@ struct userIbDev userIbDevs[MAX_IB_DEVS];
 pthread_mutex_t ncclIbLock = PTHREAD_MUTEX_INITIALIZER;
 
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", 0);
+NCCL_PARAM(IbIsGlobal, "IB_IS_GLOBAL", 0);
 NCCL_PARAM(IbTimeout, "IB_TIMEOUT", 14);
 NCCL_PARAM(IbRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbSl, "IB_SL", 0);
@@ -90,9 +91,10 @@ static ncclResult_t GetSocketAddr(union socketAddress* addr) {
 struct ncclIbQpInfo {
   uint32_t lid;
   uint8_t ib_port;
+  uint8_t is_global;
   uint32_t qpn;
 
-  // For RoCE
+  // For RoCE and IB GRH
   uint64_t spn;
   uint64_t iid;
   enum ibv_mtu mtu;
@@ -215,7 +217,12 @@ ncclResult_t ncclIbRtrQp(struct ibv_qp* qp, struct ncclIbQpInfo* info) {
   qpAttr.rq_psn = 0;
   qpAttr.max_dest_rd_atomic = 1;
   qpAttr.min_rnr_timer = 12;
-  if (info->lid == 0) {
+  qpAttr.ah_attr.is_global = 0;
+  qpAttr.ah_attr.dlid = info->lid;
+  qpAttr.ah_attr.sl = ncclParamIbSl();
+  qpAttr.ah_attr.src_path_bits = 0;
+  qpAttr.ah_attr.port_num = info->ib_port;
+  if (info->lid == 0 || info->is_global) {
     qpAttr.ah_attr.is_global = 1;
     qpAttr.ah_attr.grh.dgid.global.subnet_prefix = info->spn;
     qpAttr.ah_attr.grh.dgid.global.interface_id = info->iid;
@@ -223,13 +230,7 @@ ncclResult_t ncclIbRtrQp(struct ibv_qp* qp, struct ncclIbQpInfo* info) {
     qpAttr.ah_attr.grh.sgid_index = ncclParamIbGidIndex();
     qpAttr.ah_attr.grh.hop_limit = 255;
     qpAttr.ah_attr.grh.traffic_class = ncclParamIbTc();
-  } else {
-    qpAttr.ah_attr.is_global = 0;
-    qpAttr.ah_attr.dlid = info->lid;
   }
-  qpAttr.ah_attr.sl = ncclParamIbSl();
-  qpAttr.ah_attr.src_path_bits = 0;
-  qpAttr.ah_attr.port_num = info->ib_port;
   NCCLCHECK(wrap_ibv_modify_qp(qp, &qpAttr, IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER));
   return ncclSuccess;
 }
@@ -287,17 +288,13 @@ ncclResult_t ncclIbConnect(int dev, void* opaqueHandle, void** sendComm) {
   qpInfo.fifoRkey = comm->fifoMr->rkey;
   qpInfo.fifoAddr = (uint64_t)comm->fifo;
 
-  // RoCE support
   qpInfo.lid = portAttr.lid;
-  if (qpInfo.lid) { // IB
-    INFO(NCCL_NET,"NET/IB: Dev %d Port %d qpn %d mtu %d LID %d", dev, ib_port, qpInfo.qpn, qpInfo.mtu, qpInfo.lid);
-  } else { // RoCE
-    union ibv_gid gid;
-    NCCLCHECK(wrap_ibv_query_gid(ctx, ib_port, ncclParamIbGidIndex(), &gid));
-    qpInfo.spn = gid.global.subnet_prefix;
-    qpInfo.iid = gid.global.interface_id;
-    INFO(NCCL_NET,"NET/IB: Dev %d Port %d qpn %d mtu %d GID %ld (%lX/%lX)", dev, ib_port, qpInfo.qpn, qpInfo.mtu, ncclParamIbGidIndex(), qpInfo.spn, qpInfo.iid);
-  }
+  union ibv_gid gid;
+  NCCLCHECK(wrap_ibv_query_gid(ctx, ib_port, ncclParamIbGidIndex(), &gid));
+  qpInfo.spn = gid.global.subnet_prefix;
+  qpInfo.iid = gid.global.interface_id;
+  qpInfo.is_global = (ncclParamIbIsGlobal() || (portAttr.flags & IBV_QPF_GRH_REQUIRED));
+  INFO(NCCL_NET,"NET/IB: Dev %d Port %d qpn %d mtu %d GID %ld (%lX/%lX)", dev, ib_port, qpInfo.qpn, qpInfo.mtu, ncclParamIbGidIndex(), qpInfo.spn, qpInfo.iid);
 
   NCCLCHECK(socketSend(comm->fd, &qpInfo, sizeof(qpInfo)));
   return ncclSuccess;
@@ -365,6 +362,7 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm) {
       .qpn=rComm->gpuFlush.qp->qp_num,
       .spn=gid.global.subnet_prefix,
       .iid=gid.global.interface_id,
+      .is_global=(ncclParamIbIsGlobal() || (portAttr.flags & IBV_QPF_GRH_REQUIRED)),
       .mtu=portAttr.active_mtu
     };
     NCCLCHECK(ncclIbRtrQp(rComm->gpuFlush.qp, &localQpInfo));
@@ -378,6 +376,7 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm) {
     .qpn=qp->qp_num,
     .spn=gid.global.subnet_prefix,
     .iid=gid.global.interface_id,
+    .is_global=(ncclParamIbIsGlobal() || (portAttr.flags & IBV_QPF_GRH_REQUIRED)),
     .mtu=remQpInfo.mtu
   };
 
