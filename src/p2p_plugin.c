@@ -319,3 +319,7 @@ nccl_p2p_plugin_t nccl_p2p_get_plugin_type()
 {
   return p2p_plugin;
 }
+
+struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
+struct ncclIbDev userIbDevs[MAX_IB_DEVS];
+

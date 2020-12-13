@@ -66,8 +66,8 @@ struct userIbDev {
 };
 
 #define MAX_IB_DEVS 16
-struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
-struct ncclIbDev userIbDevs[MAX_IB_DEVS];
+extern struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
+extern struct ncclIbDev userIbDevs[MAX_IB_DEVS];
 /* Detect whether GDR can work on a given NIC with the current CUDA device
  * Returns :
  * ncclSuccess : GDR works
