@@ -9,7 +9,7 @@
 // 4. Add signal handlers in the scripts (e.g. to correctly handle Jenkins abort by timeout situations)
 
 pipeline {
-    agent {label "ml-test-node-gpu"}
+    agent {label "ml-test-node-gpu && !vbuilder"}
 
     options {
         buildDiscarder(logRotator(numToKeepStr: '10'))
