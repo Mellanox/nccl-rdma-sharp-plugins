@@ -22,6 +22,7 @@
 
 extern ncclNet_t NCCL_PLUGIN_SYMBOL;
 int ncclNSharpDevs = -1;
+NCCL_PARAM(SharpGroupSizeThresh, "SHARP_GROUP_SIZE_THRESH", 2);
 
 enum ncclSharpRequestType {
   NCCL_SHARP_REQ_SHARP_COLL,
@@ -207,6 +208,22 @@ ncclResult_t ncclSharpListen(int dev, void* opaqueHandle, void** listenComm) {
 ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* listenComm, void** collComm) {
   struct ncclSharpListenComm* lComm = (struct ncclSharpListenComm*)listenComm;
   struct ncclSharpCollComm* cComm;
+  char *useSharp;
+
+  if(nranks < ncclParamSharpGroupSizeThresh()) {
+    INFO(NCCL_INIT|NCCL_NET|NCCL_ENV, "SHARP: Group size:%d is less than threshold:%d. fallback to non-sharp",
+         nranks, ncclParamSharpGroupSizeThresh());
+    return ncclInvalidUsage;
+  }
+
+  useSharp = getenv("NCCL_SHARP_DISABLE");
+  if(useSharp != NULL) {
+    if(strcmp(useSharp, "1") == 0) {
+      INFO(NCCL_INIT|NCCL_NET|NCCL_ENV, "SHARP: Set to disable on this communicator");
+      return ncclInvalidUsage;
+    }
+  }
+
   NCCLCHECK(ncclIbMalloc((void**)&cComm, sizeof(struct ncclSharpCollComm)));
   NCCLCHECK(ncclIbMalloc((void**)&cComm->reqs, sizeof(struct ncclSharpRequest)*MAX_REQUESTS));
 
