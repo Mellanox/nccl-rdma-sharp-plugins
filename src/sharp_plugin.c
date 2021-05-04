@@ -295,7 +295,8 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
 
   ret = sharp_coll_comm_init(cComm->sharpCollContext, &comm_spec, &cComm->sharpCollComm);
   if (ret < 0) {
-    WARN("SHARP group create failed: %s(%d)\n", sharp_coll_strerror(ret), ret);
+    WARN("SHARP group create: %s(%d)\n", sharp_coll_strerror(ret), ret);
+    sharp_coll_finalize(cComm->sharpCollContext);
     return ncclInternalError;
   }
 
