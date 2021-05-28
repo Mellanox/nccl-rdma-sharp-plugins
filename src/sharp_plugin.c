@@ -180,6 +180,8 @@ ncclResult_t ncclSharpInit(ncclDebugLogger_t logFunction) {
 
   /* set SHARP COLL library default for plugin */
   setenv("SHARP_COLL_ENABLE_SAT", "1", 0);
+  setenv("SHARP_COLL_NUM_COLL_GROUP_RESOURCE_ALLOC_THRESHOLD", "0", 0);
+  setenv("SHARP_COLL_LOCK_ON_COMM_INIT", "1", 0);
   setenv("SHARP_COLL_LOG_LEVEL", "3", 0);
 
   return NCCL_PLUGIN_SYMBOL.init(logFunction);
