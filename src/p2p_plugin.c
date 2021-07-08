@@ -102,7 +102,10 @@ ncclResult_t nccl_p2p_gdr_support(int dev)
   static int module_loaded = -1;
 
   if (module_loaded == -1) {
-    module_loaded = (access("/sys/kernel/mm/memory_peers/nv_mem/version", F_OK) == -1) ? 0 : 1;
+    // Check for the nv_peer_mem module being loaded
+    module_loaded = ((access("/sys/kernel/mm/memory_peers/nv_mem/version", F_OK) == -1) &&
+                     // Also support the new nvidia-peermem module
+                     (access("/sys/kernel/mm/memory_peers/nvidia-peermem/version", F_OK) == -1)) ? 0 : 1;
   }
 
   if (module_loaded == 0) {
