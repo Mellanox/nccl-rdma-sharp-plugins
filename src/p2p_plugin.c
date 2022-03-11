@@ -228,7 +228,8 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
           ncclIbDevs[ncclNIbDevs].isSharpDev = 0;
           if ((portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) &&
               (vendorId == 0x15b3) &&           // Mellanox vendor
-              (devId == 4123 || devId == 4124)) //ConnectX-6
+              (devId == 4123 || devId == 4124 ||// ConnectX-6
+               devId == 4129))                  // ConnectX-7
           {
             ncclIbDevs[ncclNIbDevs].isSharpDev = 1;
             ncclIbDevs[ncclNIbDevs].maxQp = ncclParamSharpMaxComms();
