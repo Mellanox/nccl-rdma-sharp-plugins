@@ -11,6 +11,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "core.h"
 #include "nccl.h"
 #include "nccl_net.h"
@@ -22,7 +23,9 @@
 
 extern ncclNet_t NCCL_PLUGIN_SYMBOL;
 int ncclNSharpDevs = -1;
+struct sharp_coll_caps sharp_caps;
 NCCL_PARAM(SharpGroupSizeThresh, "SHARP_GROUP_SIZE_THRESH", 2);
+NCCL_PARAM(SharpV3Datatypes, "SHARP_V3_DATATYPES", 1);
 
 enum ncclSharpRequestType {
   NCCL_SHARP_REQ_SHARP_COLL,
@@ -71,6 +74,11 @@ static __inline__ enum sharp_datatype typeConvert(ncclDataType_t type) {
     case ncclInt64: return SHARP_DTYPE_LONG;
     case ncclUint64: return SHARP_DTYPE_UNSIGNED_LONG;
     case ncclFloat64: return SHARP_DTYPE_DOUBLE;
+#ifdef HAVE_SHARP_DTYPE_BFLOAT16_UINT8_INT8
+    case ncclBfloat16: return (ncclParamSharpV3Datatypes() ? SHARP_DTYPE_BFLOAT16 : SHARP_DTYPE_NULL);
+    case ncclInt8: return (ncclParamSharpV3Datatypes() ? SHARP_DTYPE_INT8 : SHARP_DTYPE_NULL);
+    case ncclUint8: return (ncclParamSharpV3Datatypes() ? SHARP_DTYPE_UINT8 : SHARP_DTYPE_NULL);
+#endif
     default: return SHARP_DTYPE_NULL;
   }
 }
@@ -84,6 +92,9 @@ static __inline__ int typeSize(ncclDataType_t type) {
     case ncclInt64: return 8;
     case ncclUint64: return 8;
     case ncclFloat64: return 8;
+    case ncclBfloat16: return 2;
+    case ncclInt8: return 1;
+    case ncclUint8: return 1;
     default:
       WARN("SHARP: unsupported data type\n");
       return -1;
