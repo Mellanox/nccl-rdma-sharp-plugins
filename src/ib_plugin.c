@@ -79,11 +79,13 @@ static ncclResult_t GetSocketAddr(union socketAddress* addr) {
   return ncclSuccess;
 }
 
+#define NCCL_IB_MAX_QPS 128
+
 struct ncclIbQpInfo {
   uint32_t lid;
   uint8_t ib_port;
   uint8_t is_global;
-  uint32_t qpn;
+  uint32_t qpn[NCCL_IB_MAX_QPS];
 
   // For RoCE and IB GRH
   uint64_t spn;
@@ -119,7 +121,8 @@ struct ncclIbSendComm {
   uint32_t fifoHead;
   int fd;
   int ready;
-  struct ibv_qp* qp;
+  struct ibv_qp* qps[NCCL_IB_MAX_QPS];
+  int nqps;
   struct ibv_mr* fifoMr;
 };
 struct ncclIbGpuFlush {
@@ -146,7 +149,8 @@ struct ncclIbRecvComm {
   struct ncclIbRequest reqs[MAX_REQUESTS];
   int fd;
   int ready;
-  struct ibv_qp* qp;
+  struct ibv_qp* qps[NCCL_IB_MAX_QPS];
+  int nqps;
   struct ncclIbGpuFlush gpuFlush;
 };
 
@@ -168,10 +172,12 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
   return nccl_p2p_ib_init(&ncclNIbDevs, ncclIbDevs, ncclIbIfName, &ncclIbIfAddr, &ncclIbAsyncThread, logFunction);
 }
 
+NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
+
 ncclResult_t ncclIbInitVerbs(struct ibv_context* ctx, struct ncclIbVerbs* verbs) {
   NCCLCHECK(wrap_ibv_alloc_pd(&verbs->pd, ctx));
   // Recv requests can generate 2 completions (one for the post FIFO, one for the Recv).
-  NCCLCHECK(wrap_ibv_create_cq(&verbs->cq, ctx, 2*MAX_REQUESTS, NULL, NULL, 0));
+  NCCLCHECK(wrap_ibv_create_cq(&verbs->cq, ctx, 2*MAX_REQUESTS*ncclParamIbQpsPerConn(), NULL, NULL, 0));
   return ncclSuccess;
 }
 
@@ -204,12 +210,12 @@ ncclResult_t ncclIbCreateQp(uint8_t ib_port, struct ncclIbVerbs* verbs, int acce
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbRtrQp(struct ibv_qp* qp, struct ncclIbQpInfo* info) {
+ncclResult_t ncclIbRtrQp(struct ibv_qp* qp, uint32_t qpn, struct ncclIbQpInfo* info) {
   struct ibv_qp_attr qpAttr;
   memset(&qpAttr, 0, sizeof(struct ibv_qp_attr));
   qpAttr.qp_state = IBV_QPS_RTR;
   qpAttr.path_mtu = info->mtu;
-  qpAttr.dest_qp_num = info->qpn;
+  qpAttr.dest_qp_num = qpn;
   qpAttr.rq_psn = 0;
   qpAttr.max_dest_rd_atomic = 1;
   qpAttr.min_rnr_timer = 12;
@@ -270,14 +276,17 @@ ncclResult_t ncclIbConnect(int dev, void* opaqueHandle, void** sendComm) {
   struct ibv_context* ctx = ncclIbDevs[dev].context;
   NCCLCHECK(ncclIbInitVerbs(ctx, &comm->verbs));
   uint8_t ib_port = ncclIbDevs[dev].port;
-  NCCLCHECK(ncclIbCreateQp(ib_port, &comm->verbs, IBV_ACCESS_REMOTE_WRITE, &comm->qp));
+  comm->nqps = ncclParamIbQpsPerConn();
+  for (int q=0; q<comm->nqps; q++) {
+    NCCLCHECK(ncclIbCreateQp(ib_port, &comm->verbs, IBV_ACCESS_REMOTE_WRITE, comm->qps+q));
+  }
 
   // Send my QP Info to receiver through the socket. Hope this won't block.
   struct ibv_port_attr portAttr;
   NCCLCHECK(wrap_ibv_query_port(ctx, ib_port, &portAttr));
   struct ncclIbQpInfo qpInfo;
   qpInfo.ib_port = ib_port;
-  qpInfo.qpn = comm->qp->qp_num;
+  for (int q=0; q<comm->nqps; q++) qpInfo.qpn[q] = comm->qps[q]->qp_num;
   qpInfo.mtu = portAttr.active_mtu;
 
   // Prepare my fifo
@@ -291,7 +300,8 @@ ncclResult_t ncclIbConnect(int dev, void* opaqueHandle, void** sendComm) {
   qpInfo.spn = gid.global.subnet_prefix;
   qpInfo.iid = gid.global.interface_id;
   qpInfo.is_global = (ncclParamIbIsGlobal() || (portAttr.flags & IBV_QPF_GRH_REQUIRED));
-  INFO(NCCL_NET,"NET/IB: Dev %d Port %d qpn %d mtu %d GID %ld (%lX/%lX)", dev, ib_port, qpInfo.qpn, qpInfo.mtu, ncclParamIbGidIndex(), qpInfo.spn, qpInfo.iid);
+  for (int q=0; q<comm->nqps; q++)
+    INFO(NCCL_NET,"NET/IB: Dev %d Port %d qpn %d mtu %d GID %ld (%lX/%lX)", dev, ib_port, qpInfo.qpn[q], qpInfo.mtu, ncclParamIbGidIndex(), qpInfo.spn, qpInfo.iid);
 
   NCCLCHECK(socketSend(comm->fd, &qpInfo, sizeof(qpInfo)));
   return ncclSuccess;
@@ -320,15 +330,20 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm) {
 
   // QP Creation
   NCCLCHECK(ncclIbInitVerbs(ctx, &rComm->verbs));
-  NCCLCHECK(ncclIbCreateQp(ib_port, &rComm->verbs, IBV_ACCESS_REMOTE_WRITE, &rComm->qp));
+  rComm->nqps = ncclParamIbQpsPerConn();
+  for (int q=0; q<rComm->nqps; q++) {
+    NCCLCHECK(ncclIbCreateQp(ib_port, &rComm->verbs, IBV_ACCESS_REMOTE_WRITE, rComm->qps+q));
+  }
 
   // Adjust the MTU
   remQpInfo.mtu = (enum ibv_mtu)MIN(remQpInfo.mtu, portAttr.active_mtu);
 
   // Setup QP
-  struct ibv_qp* qp = rComm->qp;
-  NCCLCHECK(ncclIbRtrQp(qp, &remQpInfo));
-  NCCLCHECK(ncclIbRtsQp(qp));
+  for (int q=0; q<rComm->nqps; q++) {
+    struct ibv_qp* qp = rComm->qps[q];
+    NCCLCHECK(ncclIbRtrQp(qp, remQpInfo.qpn[q], &remQpInfo));
+    NCCLCHECK(ncclIbRtsQp(qp));
+  }
 
   // Retain remote fifo info and prepare my RDMA ops
   rComm->remFifo.rkey = remQpInfo.fifoRkey;
@@ -346,29 +361,26 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm) {
     rComm->gpuFlush.sge.length = 1;
     rComm->gpuFlush.sge.lkey = rComm->gpuFlush.hostMr->lkey;
     NCCLCHECK(ncclIbCreateQp(ib_port, &rComm->verbs, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ, &rComm->gpuFlush.qp));
-    struct ncclIbQpInfo localQpInfo = {
-      .lid=portAttr.lid,
-      .ib_port=ib_port,
-      .qpn=rComm->gpuFlush.qp->qp_num,
-      .spn=gid.global.subnet_prefix,
-      .iid=gid.global.interface_id,
-      .is_global=(ncclParamIbIsGlobal() || (portAttr.flags & IBV_QPF_GRH_REQUIRED)),
-      .mtu=portAttr.active_mtu
-    };
-    NCCLCHECK(ncclIbRtrQp(rComm->gpuFlush.qp, &localQpInfo));
+    struct ncclIbQpInfo localQpInfo;
+    localQpInfo.lid=portAttr.lid;
+    localQpInfo.ib_port=ib_port;
+    localQpInfo.spn=gid.global.subnet_prefix;
+    localQpInfo.iid=gid.global.interface_id;
+    localQpInfo.is_global=(ncclParamIbIsGlobal() || (portAttr.flags & IBV_QPF_GRH_REQUIRED)),
+    localQpInfo.mtu=portAttr.active_mtu;
+    NCCLCHECK(ncclIbRtrQp(rComm->gpuFlush.qp, rComm->gpuFlush.qp->qp_num, &localQpInfo));
     NCCLCHECK(ncclIbRtsQp(rComm->gpuFlush.qp));
   }
 
   // Fill Handle
-  struct ncclIbQpInfo qpInfo = {
-    .lid=portAttr.lid,
-    .ib_port=ib_port,
-    .qpn=qp->qp_num,
-    .spn=gid.global.subnet_prefix,
-    .iid=gid.global.interface_id,
-    .is_global=(ncclParamIbIsGlobal() || (portAttr.flags & IBV_QPF_GRH_REQUIRED)),
-    .mtu=remQpInfo.mtu
-  };
+  struct ncclIbQpInfo qpInfo;
+  qpInfo.lid=portAttr.lid;
+  qpInfo.ib_port=ib_port;
+  for (int q=0; q<rComm->nqps; q++) qpInfo.qpn[q]=rComm->qps[q]->qp_num;
+  qpInfo.spn=gid.global.subnet_prefix;
+  qpInfo.iid=gid.global.interface_id;
+  qpInfo.is_global=(ncclParamIbIsGlobal() || (portAttr.flags & IBV_QPF_GRH_REQUIRED)),
+  qpInfo.mtu=remQpInfo.mtu;
 
   NCCLCHECK(socketSend(rComm->fd, &qpInfo, sizeof(qpInfo)));
   *recvComm = rComm;
@@ -399,7 +411,6 @@ ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r) {
 
 ncclResult_t ncclSendCheck(struct ncclIbSendComm* comm) {
   struct ncclIbQpInfo remQpInfo;
-  struct ibv_qp* qp = comm->qp;
 
   // Do not block on this receive, return if not ready.
   int bytes = 0;
@@ -407,8 +418,11 @@ ncclResult_t ncclSendCheck(struct ncclIbSendComm* comm) {
   if (bytes == 0) return ncclSuccess; // Try again later
   NCCLCHECK(socketWait(NCCL_SOCKET_RECV, comm->fd, &remQpInfo, sizeof(remQpInfo), &bytes));
 
-  NCCLCHECK(ncclIbRtrQp(qp, &remQpInfo));
-  NCCLCHECK(ncclIbRtsQp(qp));
+  for (int q=0; q<comm->nqps; q++) {
+    struct ibv_qp* qp = comm->qps[q];
+    NCCLCHECK(ncclIbRtrQp(qp, remQpInfo.qpn[q], &remQpInfo));
+    NCCLCHECK(ncclIbRtsQp(qp));
+  }
   comm->ready = 1;
   // Block until this is done. It *should* not block indefinitely.
   NCCLCHECK(socketSend(comm->fd, &comm->ready, sizeof(int)));
@@ -472,22 +486,16 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, void* mhandle, vo
   NCCLCHECK(ncclIbGetRequest(&comm->verbs, &req));
   req->size = size;
 
-  struct ibv_send_wr wr;
-  memset(&wr, 0, sizeof(wr));
-  wr.wr_id = (uint64_t)req;
+  struct ibv_send_wr wr[2];
+  memset(&wr[0], 0, sizeof(wr[0]));
+  wr[0].wr_id = (uint64_t)req;
 
   struct ibv_sge sge;
-  if (size == 0) {
-    wr.sg_list = NULL;
-    wr.num_sge = 0;
-  } else {
-    sge.addr=(uintptr_t)data; sge.length=(unsigned int)size; sge.lkey=mr->lkey;
-    wr.sg_list = &sge;
-    wr.num_sge = 1;
-  }
+  sge.addr=(uintptr_t)data; sge.lkey=mr->lkey;
+
 #if USE_RDMA_WRITE == 0
-  wr.opcode = IBV_WR_SEND;
-  wr.send_flags = IBV_SEND_SIGNALED;
+  wr[0].opcode = IBV_WR_SEND;
+  wr[0].send_flags = IBV_SEND_SIGNALED;
 #else
   __sync_synchronize(); // order the readyPtr load against rkey load below
   // Sanity checks to catch user collective call count/size mismatches
@@ -497,15 +505,11 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, void* mhandle, vo
         size, slot->size, slot->addr, slot->rkey, slot->seq, comm->fifoHead);
     return ncclInternalError;
   }
-  int useAr = 0;
-  if (size > ncclParamIbArThreshold()) {
-    useAr = 1;
-  }
-  wr.opcode = useAr ? IBV_WR_RDMA_WRITE : IBV_WR_RDMA_WRITE_WITH_IMM;
-  wr.send_flags = useAr ? 0 : IBV_SEND_SIGNALED;
-  wr.wr.rdma.remote_addr = slot->addr;
-  wr.wr.rdma.rkey = slot->rkey;
-  wr.imm_data = size; // Send the message size via imm_data
+  wr[0].opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+  wr[0].send_flags = IBV_SEND_SIGNALED;
+  wr[0].wr.rdma.remote_addr = slot->addr;
+  wr[0].wr.rdma.rkey = slot->rkey;
+  wr[0].imm_data = size; // Send the message size via imm_data
   __sync_synchronize();
 #endif
   // We must clear slot->ready, but reset other fields to aid
@@ -515,21 +519,46 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, void* mhandle, vo
   slot->rkey = slot->size = slot->seq = 0;
   comm->fifoHead++;
 
-  struct ibv_send_wr* bad_wr;
-  NCCLCHECK(wrap_ibv_post_send(comm->qp, &wr, &bad_wr));
 
 #if USE_RDMA_WRITE
   // When using adaptive routing, send the bulk of the data first as an
   // RDMA_WRITE, then a 0-byte RDMA_WRITE_WITH_IMM to trigger a remote
   // completion.
-  if (useAr) {
-    wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
-    wr.sg_list = NULL;
-    wr.num_sge = 0;
-    wr.send_flags |= IBV_SEND_SIGNALED;
-    NCCLCHECK(wrap_ibv_post_send(comm->qp, &wr, &bad_wr));
+  if (size > ncclParamIbArThreshold()) {
+    memcpy(&wr[1], &wr[0], sizeof(wr[0]));
+    wr[1].sg_list = NULL;
+    wr[1].num_sge = 0;
+    wr[0].next = &wr[1];
+
+    wr[0].opcode = IBV_WR_RDMA_WRITE;
+    wr[1].opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+
+    wr[0].send_flags = 0;
+    wr[1].send_flags = IBV_SEND_SIGNALED;
   }
 #endif
+
+  int chunkSize = MAX(8, DIVUP(size, comm->nqps));
+
+  int offset = 0;
+  for (int q=0; q<comm->nqps; q++) {
+    int length = MIN(size-offset, chunkSize);
+    if (length <= 0) {
+      wr[0].sg_list = NULL;
+      wr[0].num_sge = 0;
+    } else {
+      sge.length = length;
+      wr[0].sg_list = &sge;
+      wr[0].num_sge = 1;
+    }
+    struct ibv_send_wr* bad_wr;
+    NCCLCHECK(wrap_ibv_post_send(comm->qps[q], wr, &bad_wr));
+    offset += chunkSize;
+    sge.addr += chunkSize;
+    wr[0].wr.rdma.remote_addr += chunkSize;
+  }
+  req->events = comm->nqps;
+
   *request = req;
   return ncclSuccess;
 }
@@ -581,7 +610,7 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, uint32_t rkey, uint64_t
   }
 
   struct ibv_send_wr* bad_wr;
-  NCCLCHECK(wrap_ibv_post_send(comm->qp, &wr, &bad_wr));
+  NCCLCHECK(wrap_ibv_post_send(comm->qps[0], &wr, &bad_wr));
   comm->remFifo.tail++;
 
   return ncclSuccess;
@@ -602,18 +631,16 @@ ncclResult_t ncclIbIrecv(void* recvComm, void* data, int size, void* mhandle, vo
   memset(&wr, 0, sizeof(wr));
   wr.wr_id = (uint64_t)req;
 
-  struct ibv_sge sge;
-  if (size == 0) {
-    wr.sg_list = NULL;
-    wr.num_sge = 0;
-  } else {
-    sge.addr=(uintptr_t)data; sge.length=(unsigned int)size; sge.lkey=mr->lkey;
-    wr.sg_list = &sge;
-    wr.num_sge = 1;
-  }
+  wr.sg_list = NULL;
+  wr.num_sge = 0;
 
-  struct ibv_recv_wr* bad_wr;
-  NCCLCHECK(wrap_ibv_post_recv(comm->qp, &wr, &bad_wr));
+  for (int q=0; q<comm->nqps; q++) {
+    struct ibv_qp* qp = comm->qps[q];
+    struct ibv_recv_wr* bad_wr;
+    NCCLCHECK(wrap_ibv_post_recv(qp, &wr, &bad_wr));
+  }
+  req->events = comm->nqps;
+
   *request = req;
 
   // Post to FIFO to notify sender
@@ -677,7 +704,10 @@ ncclResult_t ncclIbTest(void* request, int* done, int* size) {
           doneReq->size = wc->byte_len;
 #if USE_RDMA_WRITE
         } else if (wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
-          doneReq->size = wc->imm_data;
+          if (doneReq->size == -1)
+            doneReq->size = wc->imm_data;
+          else
+            doneReq->size += wc->imm_data;
 #endif
         }
         doneReq->events--;
@@ -690,7 +720,8 @@ ncclResult_t ncclIbCloseSend(void* sendComm) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   if (comm) {
     close(comm->fd);
-    if (comm->qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->qp));
+    for (int q=0; q<comm->nqps; q++)
+      if (comm->qps[q] != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->qps[q]));
     if (comm->fifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(comm->fifoMr));
     NCCLCHECK(ncclIbDestroyVerbs(&comm->verbs));
     free(comm);
@@ -702,7 +733,8 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   if (comm) {
     close(comm->fd);
-    if (comm->qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->qp));
+    for (int q=0; q<comm->nqps; q++)
+      if (comm->qps[q] != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->qps[q]));
     if (comm->gpuFlush.enabled) {
       if (comm->gpuFlush.qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->gpuFlush.qp));
       if (comm->gpuFlush.hostMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(comm->gpuFlush.hostMr));
