@@ -113,7 +113,9 @@ do
     #===================
     # NCCL_PLUGIN_P2P
     #===================
-    for P2P_LAYER in ucx ucx_rma ib
+    # Enable ucx_rma tests once this is resolved: https://redmine.mellanox.com/issues/3037941
+    # for P2P_LAYER in ucx ucx_rma ib
+    for P2P_LAYER in ucx ib
     do
         MPIRUN_OPTIONS_PLUGIN_P2P_LAYER="-x NCCL_PLUGIN_P2P=${P2P_LAYER}"
 
@@ -149,7 +151,7 @@ do
 
                 if [ "${NCCL_ALGO}" = "CollNet" ]
                 then
-                    MPIRUN_OPTIONS_NCCL_ALGO="-x NCCL_COLLNET_ENABLE=1 ${MPIRUN_OPTIONS_NCCL_ALGO}"
+                    MPIRUN_OPTIONS_NCCL_ALGO="-x NCCL_COLLNET_ENABLE=1"
                 fi
 
                 #===================

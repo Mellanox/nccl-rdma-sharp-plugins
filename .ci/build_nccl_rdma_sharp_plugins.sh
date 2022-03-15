@@ -5,9 +5,6 @@ cd "${SCRIPT_DIR}"
 # shellcheck source=settings.sh
 . "${SCRIPT_DIR}/settings.sh"
 
-NCCL_RDMA_SHARP_PLUGINS_DIR="${NCCL_RDMA_SHARP_PLUGINS_DIR:-${WORKSPACE}/_install}"
-echo "INFO: NCCL_RDMA_SHARP_PLUGINS_DIR = ${NCCL_RDMA_SHARP_PLUGINS_DIR}"
-
 cd "${WORKSPACE}"
 
 if ! "${WORKSPACE}/autogen.sh"; then
