@@ -85,6 +85,7 @@ struct ncclIbQpInfo {
   uint32_t lid;
   uint8_t ib_port;
   uint8_t is_global;
+  uint8_t link_layer;
   uint32_t qpn[NCCL_IB_MAX_QPS];
 
   // For RoCE and IB GRH
@@ -224,7 +225,7 @@ ncclResult_t ncclIbRtrQp(struct ibv_qp* qp, uint32_t qpn, struct ncclIbQpInfo* i
   qpAttr.ah_attr.sl = ncclParamIbSl();
   qpAttr.ah_attr.src_path_bits = 0;
   qpAttr.ah_attr.port_num = info->ib_port;
-  if (info->lid == 0 || info->is_global) {
+  if (info->link_layer == IBV_LINK_LAYER_ETHERNET || info->is_global) {
     qpAttr.ah_attr.is_global = 1;
     qpAttr.ah_attr.grh.dgid.global.subnet_prefix = info->spn;
     qpAttr.ah_attr.grh.dgid.global.interface_id = info->iid;
@@ -295,6 +296,7 @@ ncclResult_t ncclIbConnect(int dev, void* opaqueHandle, void** sendComm) {
   qpInfo.fifoAddr = (uint64_t)comm->fifo;
 
   qpInfo.lid = portAttr.lid;
+  qpInfo.link_layer = portAttr.link_layer;
   union ibv_gid gid;
   NCCLCHECK(wrap_ibv_query_gid(ctx, ib_port, ncclParamIbGidIndex(), &gid));
   qpInfo.spn = gid.global.subnet_prefix;
@@ -363,6 +365,7 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm) {
     NCCLCHECK(ncclIbCreateQp(ib_port, &rComm->verbs, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ, &rComm->gpuFlush.qp));
     struct ncclIbQpInfo localQpInfo;
     localQpInfo.lid=portAttr.lid;
+    localQpInfo.link_layer=portAttr.link_layer;
     localQpInfo.ib_port=ib_port;
     localQpInfo.spn=gid.global.subnet_prefix;
     localQpInfo.iid=gid.global.interface_id;
@@ -375,6 +378,7 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm) {
   // Fill Handle
   struct ncclIbQpInfo qpInfo;
   qpInfo.lid=portAttr.lid;
+  qpInfo.link_layer=portAttr.link_layer;
   qpInfo.ib_port=ib_port;
   for (int q=0; q<rComm->nqps; q++) qpInfo.qpn[q]=rComm->qps[q]->qp_num;
   qpInfo.spn=gid.global.subnet_prefix;
