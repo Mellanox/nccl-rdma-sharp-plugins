@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <assert.h>
 
 #include "config.h"
 #include "core.h"
@@ -115,6 +116,9 @@ int ncclSharpAllGather(void *context, void *buf, int len) {
   nccl_p2p_plugin_t p2p_plugin;
   void* rMhandle = NULL, *sMhandle = NULL;
 
+  assert(cComm->recvComm != NULL);
+  assert(cComm->sendComm != NULL);
+
   p2p_plugin = nccl_p2p_get_plugin_type();
   if (p2p_plugin != NCCL_P2P_UCX) {
     NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->recvComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &rMhandle));
@@ -126,8 +130,10 @@ int ncclSharpAllGather(void *context, void *buf, int len) {
     void* srequest = NULL, *rrequest = NULL;
     int rpeer = (speer-1+cComm->nranks)%cComm->nranks;
     while (srequest == NULL || rrequest == NULL) {
-       if (srequest == NULL) NCCLCHECK(NCCL_PLUGIN_SYMBOL.isend(cComm->sendComm, ((char*)buf)+speer*len, len, sMhandle, &srequest));
-       if (rrequest == NULL) NCCLCHECK(NCCL_PLUGIN_SYMBOL.irecv(cComm->recvComm, ((char*)buf)+rpeer*len, len, rMhandle, &rrequest));
+       void *rbuf = ((char*)buf)+rpeer*len;
+       int tag = 0x69;
+       if (srequest == NULL) NCCLCHECK(NCCL_PLUGIN_SYMBOL.isend(cComm->sendComm, ((char*)buf)+speer*len, len, tag, sMhandle, &srequest));
+       if (rrequest == NULL) NCCLCHECK(NCCL_PLUGIN_SYMBOL.irecv(cComm->recvComm, 1, &rbuf, &len, &tag, &rMhandle, &rrequest));
     }
     while (srequest || rrequest) {
       int done;
@@ -247,8 +253,13 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
     return ncclInternalError;
   }
   int next = (cComm->rank + 1) % nranks;
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.connect(lComm->dev, handles[next], &cComm->sendComm));
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.accept(lComm->listenCommP2P, &cComm->recvComm)); // From prev
+  do {
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.connect(lComm->dev, handles[next], &cComm->sendComm));
+  } while(cComm->sendComm == NULL);
+
+  do {
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.accept(lComm->listenCommP2P, &cComm->recvComm)); // From prev
+  } while(cComm->recvComm == NULL);
 
   struct ncclSharpInfo* allInfo;
   pid_t pid = getpid();
@@ -293,10 +304,10 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
 
   int ret = sharp_coll_init(&init_spec, &cComm->sharpCollContext);
 
-  INFO(NCCL_INIT, "Sharp rank %d/%d initialized on %s", cComm->rank, nranks, devName);
+  INFO(NCCL_INIT, "SHARP rank %d/%d initialized on %s", cComm->rank, nranks, devName);
 
   if (ret < 0) {
-    WARN("NET/IB :SHARP coll init error: %s(%d)\n", sharp_coll_strerror(ret), ret);
+    WARN("NET/IB : SHARP coll init error: %s(%d)\n", sharp_coll_strerror(ret), ret);
     return ncclInternalError;
   }
 
@@ -437,7 +448,7 @@ ncclResult_t ncclSharpIflush(void* collComm, void* data, int size, void* mhandle
 
   NCCLCHECK(ncclSharpGetRequest(cComm->reqs, &req));
   req->requestType = NCCL_SHARP_REQ_IFLUSH;
-  NCCL_PLUGIN_SYMBOL.iflush(cComm->recvComm, data, size, mh->ncclIbMr, &req->sharpRequest);
+  NCCL_PLUGIN_SYMBOL.iflush(cComm->recvComm, 1, &data, &size, &mh->ncclIbMr, &req->sharpRequest);
   if (!req->sharpRequest) {
     *request = NULL;
      req->used = 0;

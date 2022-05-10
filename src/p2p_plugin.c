@@ -33,6 +33,7 @@ extern int ncclNSharpDevs;
 /* In case sharp plugin is not there just define this variable locally to make code cleaner */
 int ncclNSharpDevs;
 #endif
+extern int ncclIbRelaxedOrderingEnabled;
 NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
 
 ncclResult_t pluginInit(ncclDebugLogger_t logFunction);
@@ -124,8 +125,10 @@ ncclResult_t nccl_p2p_ib_get_properties(nccl_ib_dev_t *devs, int dev, ncclNetPro
     props->ptrSupport |= NCCL_PTR_CUDA;
   }
   props->speed        = devs[dev].speed;
+  props->latency      = 0; // Not set
   props->port         = devs[dev].port + devs[dev].realPort;
   props->maxComms     = devs[dev].maxQp;
+  props->maxRecvs     = (p2p_plugin == NCCL_P2P_IB) ? NCCL_NET_IB_MAX_RECVS : 1;
 
   return ncclSuccess;
 }
@@ -154,7 +157,7 @@ int devSharpCompare(const void *a, const void *b)
   else { return 1; }
 }
 
-ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *ncclIbIfName, union socketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction)
+ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *ncclIbIfName, union ncclSocketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction)
 {
   int ncclNIbDevs = *num_devs;
 
@@ -165,7 +168,7 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
     if (ncclNIbDevs == -1) {
       ncclNIbDevs = 0;
       ncclNSharpDevs = 0;
-      if (findInterfaces(ncclIbIfName, ncclIbIfAddr, MAX_IF_NAME_SIZE, 1) != 1) {
+      if (ncclFindInterfaces(ncclIbIfName, ncclIbIfAddr, MAX_IF_NAME_SIZE, 1) != 1) {
         WARN("NET/IB : No IP interface found.");
         return ncclInternalError;
       }
@@ -190,7 +193,7 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
           WARN("NET/IB : Unable to open device %s", devices[d]->name);
           continue;
         }
-        int found = 0;
+        int nPorts = 0;
         struct ibv_device_attr devAttr;
         if (ncclSuccess != wrap_ibv_query_device(context, &devAttr)) {
           WARN("NET/IB : Unable to query device %s", devices[d]->name);
@@ -214,15 +217,21 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
           }
           TRACE(NCCL_INIT|NCCL_NET,"NET/IB: [%d] %s:%d/%s ", d, devices[d]->name, port,
               portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
+          pthread_mutex_init(&ncclIbDevs[ncclNIbDevs].lock, NULL);
           ncclIbDevs[ncclNIbDevs].device = d;
           ncclIbDevs[ncclNIbDevs].guid = devAttr.sys_image_guid;
           ncclIbDevs[ncclNIbDevs].port = port;
           ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
           ncclIbDevs[ncclNIbDevs].speed = nccl_p2p_ib_speed(portAttr.active_speed) * nccl_p2p_ib_width(portAttr.active_width);
           ncclIbDevs[ncclNIbDevs].context = context;
+          ncclIbDevs[ncclNIbDevs].pdRefs = 0;
+          ncclIbDevs[ncclNIbDevs].pd = NULL;
           strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
           NCCLCHECK(nccl_p2p_ib_pci_path(ncclIbDevs, ncclNIbDevs, ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort));
           ncclIbDevs[ncclNIbDevs].maxQp = devAttr.max_qp;
+          ncclIbDevs[ncclNIbDevs].mrCache.capacity = 0;
+          ncclIbDevs[ncclNIbDevs].mrCache.population = 0;
+          ncclIbDevs[ncclNIbDevs].mrCache.slots = NULL;
           readFileNumber(&vendorId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "vendor");
           readFileNumber(&devId, IB_DEVICE_SYSFS_FMT, devices[d]->name, "device");
           ncclIbDevs[ncclNIbDevs].isSharpDev = 0;
@@ -235,14 +244,16 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
             ncclIbDevs[ncclNIbDevs].maxQp = ncclParamSharpMaxComms();
             ncclNSharpDevs++;
           }
-          ncclNIbDevs++;
-          found++;
 
           if (ncclIbAsyncThread != NULL) {
             pthread_create(ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, context);
+            ncclSetThreadName(*ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
+            pthread_detach(*ncclIbAsyncThread); // will not be pthread_join()'d
           }
+          ncclNIbDevs++;
+          nPorts++;
         }
-        if (found == 0 && ncclSuccess != wrap_ibv_close_device(context)) { return ncclInternalError; }
+        if (nPorts == 0 && ncclSuccess != wrap_ibv_close_device(context)) { return ncclInternalError; }
       }
       if (nIbDevs && (ncclSuccess != wrap_ibv_free_device_list(devices))) { return ncclInternalError; };
     }
@@ -256,6 +267,8 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
 
       char line[1024];
       line[0] = '\0';
+      // Determine whether RELAXED_ORDERING is enabled and possible
+      ncclIbRelaxedOrderingEnabled = ncclIbRelaxedOrderingCapable();
       for (int d=0; d<ncclNIbDevs; d++) {
 #ifdef HAVE_SHARP_PLUGIN
         snprintf(line+strlen(line), 1023-strlen(line), " [%d]%s:%d/%s%s", d, ncclIbDevs[d].devName,
@@ -268,7 +281,8 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
       }
       line[1023] = '\0';
       char addrline[SOCKET_NAME_MAXLEN+1];
-      INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s ; OOB %s:%s", line, ncclIbIfName, socketToString(&ncclIbIfAddr->sa, addrline));
+      INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
+           ncclIbIfName, ncclSocketToString(ncclIbIfAddr, addrline, 1));
     }
     *num_devs = ncclNIbDevs;
     pthread_mutex_unlock(&nccl_p2p_lock);

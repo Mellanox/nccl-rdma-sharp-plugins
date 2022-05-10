@@ -13,6 +13,8 @@ libnccl_net_la_LDFLAGS  = $(LDFLAGS)
 libnccl_net_la_SOURCES = \
 	ibvwrap.c \
 	utils.c	\
+        param.c \
+	socket.c \
 	p2p_plugin.c \
 	ib_plugin.c
 
