@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
  * Copyright (C) 2019-2020, Mellanox Technologies Ltd. All rights reserved.
  *
  * See LICENSE.txt for license information
@@ -10,6 +10,9 @@
 
 #include <stdint.h>
 #include <unistd.h>
+#define ENABLE_TIMER 0
+#include "timer.h"
+#include <assert.h>
 
 #include "nccl.h"
 #include "nccl_net.h"
@@ -19,8 +22,12 @@
 #include "utils.h"
 
 #define MAXNAMESIZE 64
-#define MAX_REQUESTS NCCL_NET_MAX_REQUESTS
+#define NCCL_NET_IB_MAX_RECVS 8
+// We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive
+#define MAX_REQUESTS (NCCL_NET_MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS)
+static_assert(MAX_REQUESTS <= 256, "request id are encoded in wr_id and we need up to 8 requests ids per completion");
 #define IB_DEVICE_SYSFS_FMT "/sys/class/infiniband/%s/device/%s"
+
 
 typedef enum nccl_p2p_plugin {
   NCCL_P2P_IB,
@@ -29,22 +36,47 @@ typedef enum nccl_p2p_plugin {
   NCCL_P2P_LAST
 } nccl_p2p_plugin_t;
 
+struct ncclIbMr {
+  uintptr_t addr;
+  int pages;
+  int refs;
+  struct ibv_mr *mr;
+};
+
+struct ncclIbMrCache {
+  struct ncclIbMr *slots;
+  int capacity, population;
+};
+
 struct ncclIbRequest {
-  int used;
-  int type;
   struct ncclIbVerbs* verbs;
+  int type;
   int events;
-  int size;
+  union ncclSocketAddress *addr;
+  int nreqs;
+  union {
+    struct {
+      int size;
+      void* data;
+      uint32_t lkey;
+      int offset;
+    } send;
+    struct {
+      int sizes[NCCL_NET_IB_MAX_RECVS];
+    } recv;
+  };
 };
 
 struct ncclIbVerbs {
-  struct ibv_pd* pd;
+  int    dev;
+  struct ibv_pd* pd; // duplicate of ncclIbDevs[dev].pd
   struct ibv_cq* cq;
-  uint64_t pad[2];
+  uint64_t pad[1];
   struct ncclIbRequest reqs[MAX_REQUESTS];
 };
 
 typedef struct ncclIbDev {
+  pthread_mutex_t lock;
   int      device;
   uint64_t guid;
   uint8_t  port;
@@ -52,12 +84,15 @@ typedef struct ncclIbDev {
   uint8_t  isSharpDev;
   int      speed;
   struct   ibv_context* context;
+  int      pdRefs;
+  struct ibv_pd*  pd;
   struct   ncclIbVerbs verbs;
   char     devName[MAXNAMESIZE];
   char     *pciPath;
   int      realPort;
   int      maxQp;
-} nccl_ib_dev_t;
+  struct   ncclIbMrCache mrCache;
+} __attribute__((aligned(64))) nccl_ib_dev_t;
 
 #define MAX_IB_PORT 15
 struct userIbDev {
@@ -78,7 +113,7 @@ ncclResult_t nccl_p2p_ib_pci_path(nccl_ib_dev_t *devs, int num_devs, char* dev_n
 
 ncclResult_t nccl_p2p_ib_get_properties(nccl_ib_dev_t *devs, int dev, ncclNetProperties_t* props);
 
-ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *ncclIbIfName, union socketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction);
+ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *ncclIbIfName, union ncclSocketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction);
 
 /* Convert value returtned by ibv_query_port to actual link width */
 int nccl_p2p_ib_width(int width);
@@ -87,6 +122,8 @@ int nccl_p2p_ib_width(int width);
 int nccl_p2p_ib_speed(int speed);
 
 int64_t ncclParamSharpMaxComms();
+
+int ncclIbRelaxedOrderingCapable(void);
 
 nccl_p2p_plugin_t nccl_p2p_get_plugin_type();
 

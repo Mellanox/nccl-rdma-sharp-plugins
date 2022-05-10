@@ -14,7 +14,12 @@
 #include <sys/syscall.h>
 #include <limits.h>
 #include <string.h>
+#include <pthread.h>
 #include "nccl_net.h"
+
+// Conform to pthread and NVTX standard
+#define NCCL_THREAD_NAMELEN 16
+
 
 extern ncclDebugLogger_t pluginLogFunction;
 
@@ -26,5 +31,7 @@ extern ncclDebugLogger_t pluginLogFunction;
 #else
 #define TRACE(...)
 #endif
+
+void ncclSetThreadName(pthread_t thread, const char *fmt, ...);
 
 #endif

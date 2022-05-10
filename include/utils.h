@@ -14,6 +14,7 @@
     switch(0) {case 0:case (_cond):;}
 
 ncclResult_t ncclIbMalloc(void** ptr, size_t size);
+ncclResult_t ncclRealloc(void** ptr, size_t old_size, size_t new_size);
 ncclResult_t getHostName(char* hostname, int maxlen);
 uint64_t getHostHash();
 uint64_t getPidHash();
