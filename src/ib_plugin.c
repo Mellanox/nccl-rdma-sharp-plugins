@@ -693,13 +693,16 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 
   // Write size as immediate data. In the case of multi-send, only write
   // 0 or 1 as size to indicate whether there was data sent or received.
-  uint64_t immData = 0;
+  uint32_t immData = 0;
   if (nreqs == 1) {
     immData = reqs[0]->send.size;
   } else {
-    uint8_t* multiImmData = (uint8_t*)&immData;
+    if (nreqs > 32) {
+      WARN("Cannot store sizes of %d requests in a 32-bits field", nreqs);
+      return ncclInternalError;
+    }
     for (int r=0; r<nreqs; r++) {
-      multiImmData[r] = reqs[r]->send.size ? 1 : 0;
+      immData |= (reqs[r]->send.size ? 1 : 0) << r;
     }
   }
 
@@ -991,6 +994,7 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
             uint8_t* sizes = (uint8_t*)&wc->imm_data;
             for (int i=0; i<req->nreqs; i++) {
               req->recv.sizes[i] |= sizes[i];
+              req->recv.sizes[i] = (wc->imm_data >> i) & 0x1;
             }
           } else {
             req->recv.sizes[0] += wc->imm_data;
