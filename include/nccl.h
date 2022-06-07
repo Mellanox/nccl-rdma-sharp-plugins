@@ -15,7 +15,7 @@
 
 #define NCCL_MAJOR 2
 #define NCCL_MINOR 12
-#define NCCL_PATCH 10
+#define NCCL_PATCH 12
 #define NCCL_SUFFIX ""
 
 #define NCCL_VERSION_CODE 21210
