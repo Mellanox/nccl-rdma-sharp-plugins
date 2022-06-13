@@ -17,7 +17,7 @@ void ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int6
 
 #define NCCL_PARAM(name, env, deftVal) \
   int64_t ncclParam##name() { \
-    static_assert(deftVal != INT64_MIN, "default value cannot be the uninitialized value."); \
+    NCCL_STATIC_ASSERT(deftVal != INT64_MIN, "default value cannot be the uninitialized value."); \
     static int64_t cache = INT64_MIN; \
     if (__builtin_expect(__atomic_load_n(&cache, __ATOMIC_RELAXED) == INT64_MIN, false)) { \
       ncclLoadParam("NCCL_" env, deftVal, INT64_MIN, &cache); \

@@ -25,7 +25,7 @@
 #define NCCL_NET_IB_MAX_RECVS 8
 // We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive
 #define MAX_REQUESTS (NCCL_NET_MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS)
-static_assert(MAX_REQUESTS <= 256, "request id are encoded in wr_id and we need up to 8 requests ids per completion");
+//static_assert(MAX_REQUESTS <= 256, "request id are encoded in wr_id and we need up to 8 requests ids per completion");
 #define IB_DEVICE_SYSFS_FMT "/sys/class/infiniband/%s/device/%s"
 
 
