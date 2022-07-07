@@ -3,8 +3,7 @@ Upstream-Name: NCCL-RDMA-SHARP plugins
 Source: http://www.mellanox.com
 
 Files: *
-Copyright (C) 2019      Mellanox Technologies Ltd. All rights reserved.
-Copyright (c) 2015-2019, NVIDIA CORPORATION. All rights reserved
+Copyright (c) 2015-2019, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 License: BSD
  Redistribution and use in source and binary forms, with or without 
  modification, are permitted provided that the following conditions 

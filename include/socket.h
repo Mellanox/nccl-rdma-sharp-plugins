@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
