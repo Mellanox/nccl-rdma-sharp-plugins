@@ -25,8 +25,9 @@
 extern ncclNet_t NCCL_PLUGIN_SYMBOL;
 int ncclNSharpDevs = -1;
 struct sharp_coll_caps sharp_caps;
+static int ncclSharpV3DatatypesSupported = 0;
 NCCL_PARAM(SharpGroupSizeThresh, "SHARP_GROUP_SIZE_THRESH", 2);
-NCCL_PARAM(SharpV3Datatypes, "SHARP_V3_DATATYPES", 1);
+NCCL_PARAM(SharpV3Datatypes, "SHARP_V3_DATATYPES", 2);
 
 enum ncclSharpRequestType {
   NCCL_SHARP_REQ_SHARP_COLL,
@@ -76,9 +77,9 @@ static __inline__ enum sharp_datatype typeConvert(ncclDataType_t type) {
     case ncclUint64: return SHARP_DTYPE_UNSIGNED_LONG;
     case ncclFloat64: return SHARP_DTYPE_DOUBLE;
 #ifdef HAVE_SHARP_DTYPE_BFLOAT16_UINT8_INT8
-    case ncclBfloat16: return (ncclParamSharpV3Datatypes() ? SHARP_DTYPE_BFLOAT16 : SHARP_DTYPE_NULL);
-    case ncclInt8: return (ncclParamSharpV3Datatypes() ? SHARP_DTYPE_INT8 : SHARP_DTYPE_NULL);
-    case ncclUint8: return (ncclParamSharpV3Datatypes() ? SHARP_DTYPE_UINT8 : SHARP_DTYPE_NULL);
+    case ncclBfloat16: return (ncclSharpV3DatatypesSupported ? SHARP_DTYPE_BFLOAT16 : SHARP_DTYPE_NULL);
+    case ncclInt8: return (ncclSharpV3DatatypesSupported ? SHARP_DTYPE_INT8 : SHARP_DTYPE_NULL);
+    case ncclUint8: return (ncclSharpV3DatatypesSupported ? SHARP_DTYPE_UINT8 : SHARP_DTYPE_NULL);
 #endif
     default: return SHARP_DTYPE_NULL;
   }
@@ -304,12 +305,30 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
 
   int ret = sharp_coll_init(&init_spec, &cComm->sharpCollContext);
 
-  INFO(NCCL_INIT, "SHARP rank %d/%d initialized on %s", cComm->rank, nranks, devName);
 
   if (ret < 0) {
     WARN("NET/IB : SHARP coll init error: %s(%d)\n", sharp_coll_strerror(ret), ret);
     return ncclInternalError;
   }
+
+#ifdef HAVE_SHARP_DTYPE_BFLOAT16_UINT8_INT8
+  ret = sharp_coll_caps_query(cComm->sharpCollContext, &sharp_caps);
+  if (ret < 0) {
+    WARN("sharp_coll_caps_query failed : %s(%d)\n", sharp_coll_strerror(ret), ret);
+    sharp_coll_finalize(cComm->sharpCollContext);
+    return ncclInternalError;
+  }
+
+  int v3DatatypeMode = ncclParamSharpV3Datatypes();
+  if (v3DatatypeMode == 1 || v3DatatypeMode == 2) {
+    if (sharp_caps.support_mask.dtypes & (1<<SHARP_DTYPE_INT8))
+      ncclSharpV3DatatypesSupported = 1;
+    else
+      WARN("SHARP int8,uint8,bfloat16 Datatypes not supported");
+  }
+#endif
+
+  INFO(NCCL_INIT, "SHARP rank %d/%d initialized on %s", cComm->rank, nranks, devName);
 
   struct sharp_coll_comm_init_spec comm_spec;
   comm_spec.rank = cComm->rank;
