@@ -25,7 +25,6 @@
 #include <assert.h>
 #include "ibvwrap.h"
 
-#define USE_RDMA_WRITE 1
 #define MAXNAMESIZE 64
 static char ncclIbIfName[MAX_IF_NAME_SIZE+1];
 static union ncclSocketAddress ncclIbIfAddr;
@@ -37,7 +36,7 @@ int ncclIbRelaxedOrderingEnabled = 0;
 
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", 0);
 NCCL_PARAM(IbIsGlobal, "IB_IS_GLOBAL", 0);
-NCCL_PARAM(IbTimeout, "IB_TIMEOUT", 14);
+NCCL_PARAM(IbTimeout, "IB_TIMEOUT", 18);
 NCCL_PARAM(IbRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbPkey, "IB_PKEY", 0);
 NCCL_PARAM(IbUseInline, "IB_USE_INLINE", 0);
@@ -320,6 +319,7 @@ ncclResult_t ncclIbListen(int dev, void* opaqueHandle, void** listenComm) {
   NCCL_STATIC_ASSERT(sizeof(struct ncclIbHandle) < NCCL_NET_HANDLE_MAXSIZE, "ncclIbHandle size too large");
   memset(handle, 0, sizeof(struct ncclIbHandle));
   comm->dev = dev;
+  comm->sock.asyncFlag = 1; /* nonblocking socket is required by network communication. */
   NCCLCHECK(GetSocketAddr(&comm->sock.addr));
   NCCLCHECK(ncclSocketListen(&comm->sock));
   memcpy(&handle->connectAddr, &comm->sock.addr, sizeof(union ncclSocketAddress));
@@ -354,7 +354,7 @@ ib_connect_check:
     /* expect user to call again */
     return ncclSuccess;
   } else if (conState == ncclSocketError) {
-    return ncclSystemError;
+    return ncclRemoteError;
   }
 
   // IB Setup
@@ -431,8 +431,7 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm) {
   NCCLCHECK(ncclIbMalloc((void**)&rComm, sizeof(struct ncclIbRecvComm)));
   stage->comm = rComm;
   stage->state = ncclIbCommStateAccept;
-  lComm->sock.asyncFlag = 1;
-  rComm->sock.asyncFlag = 1;
+  NCCLCHECK(ncclSocketInit(&rComm->sock, NULL, lComm->sock.abortFlag, 1));
 
 ib_accept:
   NCCLCHECK(ncclSocketAccept(&rComm->sock, &lComm->sock));
@@ -589,7 +588,8 @@ ncclResult_t ncclRecvCheck(struct ncclIbRecvComm* comm) {
 
 ncclResult_t ncclIbTest(void* request, int* done, int* size);
 
-ncclResult_t ncclIbRegMr(void* comm, void* data, int size, int type, void** mhandle) {
+/* DMA-BUF support */
+ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
   NCCL_STATIC_ASSERT(offsetof(struct ncclIbSendComm, verbs) == offsetof(struct ncclIbRecvComm, verbs), "Send and recv comms must have verbs at the same offset")
   assert(size > 0);
 
@@ -599,7 +599,7 @@ ncclResult_t ncclIbRegMr(void* comm, void* data, int size, int type, void** mhan
   struct ncclIbVerbs* verbs = (struct ncclIbVerbs*)comm;
   struct ncclIbMrCache* cache = &ncclIbDevs[verbs->dev].mrCache;
   uintptr_t addr = (uintptr_t)data & -pageSize;
-  int pages = ((uintptr_t)data + size - addr + pageSize-1)/pageSize;
+  size_t pages = ((uintptr_t)data + size - addr + pageSize-1)/pageSize;
   ncclResult_t res;
   pthread_mutex_lock(&ncclIbDevs[verbs->dev].lock);
   for (int slot=0; /*true*/; slot++) {
@@ -611,14 +611,20 @@ ncclResult_t ncclIbRegMr(void* comm, void* data, int size, int type, void** mhan
       // Deregister / register
       struct ibv_mr* mr;
       unsigned int flags = IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ;
-      if (ncclIbRelaxedOrderingEnabled) {
-        // Use IBVERBS_1.8 API - needed for IBV_ACCESS_RELAXED_ORDERING support
-        NCCLCHECKGOTO(wrap_ibv_reg_mr_iova2(&mr, verbs->pd, (void*)addr, pages*pageSize, (uintptr_t)addr, flags|IBV_ACCESS_RELAXED_ORDERING), res, returning);
-      }
-      else {
+      if (ncclIbRelaxedOrderingEnabled) flags |= IBV_ACCESS_RELAXED_ORDERING;
+      if (fd != -1) {
+        /* DMA-BUF support */
+        NCCLCHECKGOTO(wrap_ibv_reg_dmabuf_mr(&mr, verbs->pd, offset, pages*pageSize, addr, fd, flags), res, returning);
+      } else {
+        if (ncclIbRelaxedOrderingEnabled) {
+          // Use IBVERBS_1.8 API - needed for IBV_ACCESS_RELAXED_ORDERING support
+          NCCLCHECKGOTO(wrap_ibv_reg_mr_iova2(&mr, verbs->pd, (void*)addr, pages*pageSize, addr, flags), res, returning);
+        }
+        else {
         NCCLCHECKGOTO(wrap_ibv_reg_mr(&mr, verbs->pd, (void*)addr, pages*pageSize, flags), res, returning);
+        }
       }
-      TRACE(NCCL_INIT,"regAddr %llx size %lld rkey %x", (unsigned long long)addr, (long long)pages*pageSize, mr->rkey);
+      TRACE(NCCL_INIT,"regAddr %llx size %lld rkey %x fd %d", (unsigned long long)addr, (long long)pages*pageSize, mr->rkey, fd);
       cache->population += 1;
       cache->slots[slot].addr = addr;
       cache->slots[slot].pages = pages;
@@ -638,6 +644,10 @@ ncclResult_t ncclIbRegMr(void* comm, void* data, int size, int type, void** mhan
 returning:
   pthread_mutex_unlock(&ncclIbDevs[verbs->dev].lock);
   return res;
+}
+
+ncclResult_t ncclIbRegMr(void* comm, void* data, int size, int type, void** mhandle) {
+  return ncclIbRegMrDmaBuf(comm, data, (size_t)size, type, 0ULL, -1, mhandle);
 }
 
 ncclResult_t ncclIbDeregMr(void* comm, void* mhandle) {
@@ -977,7 +987,7 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
         char line[SOCKET_NAME_MAXLEN+1];
         WARN("NET/IB : Got completion from peer %s with error %d, opcode %d, len %d, vendor err %d",
              ncclSocketToString(r->addr, line, 1), wc->status, wc->opcode, wc->byte_len, wc->vendor_err);
-        return ncclSystemError;
+        return ncclRemoteError;
       }
       struct ncclIbRequest* req = r->verbs->reqs+(wc->wr_id & 0xff);
       if (req->type == NCCL_NET_IB_REQ_SEND) {
@@ -991,15 +1001,12 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
           if (req->type != NCCL_NET_IB_REQ_RECV) return ncclInternalError;
           if (req->nreqs > 1) {
             // In the case of a multi recv, we only set sizes to 0 or 1.
-            uint8_t* sizes = (uint8_t*)&wc->imm_data;
             for (int i=0; i<req->nreqs; i++) {
-              req->recv.sizes[i] |= sizes[i];
               req->recv.sizes[i] = (wc->imm_data >> i) & 0x1;
             }
           } else {
             req->recv.sizes[0] += wc->imm_data;
           }
-
         }
         req->events--;
       }
@@ -1056,6 +1063,7 @@ ncclNet_t ibPlugin = {
   ncclIbConnect,
   ncclIbAccept,
   ncclIbRegMr,
+  ncclIbRegMrDmaBuf,
   ncclIbDeregMr,
   ncclIbIsend,
   ncclIbIrecv,

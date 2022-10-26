@@ -611,6 +611,10 @@ ncclResult_t nccl_ucx_rma_regmr(void* comm, void* data, int size, int type,
   return ncclSuccess;
 }
 
+ncclResult_t nccl_ucx_rma_regmr_dmabuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+	return nccl_ucx_rma_regmr(comm, data, size, type, mhandle);
+}
+
 ncclResult_t nccl_ucx_rma_deregmr(void* comm, void* mhandle)
 {
   nccl_ucx_rma_ctx_t *ctx = (nccl_ucx_rma_ctx_t*)comm;
@@ -1092,6 +1096,7 @@ ncclNet_t ucxRmaPlugin = {
   nccl_ucx_rma_connect,
   nccl_ucx_rma_accept,
   nccl_ucx_rma_regmr,
+  nccl_ucx_rma_regmr_dmabuf,
   nccl_ucx_rma_deregmr,
   nccl_ucx_rma_isend,
   nccl_ucx_rma_irecv,

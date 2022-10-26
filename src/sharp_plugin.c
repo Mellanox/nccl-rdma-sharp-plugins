@@ -371,6 +371,10 @@ ncclResult_t ncclSharpRegMr(void* collComm, void* data, int size, int type, void
   return ncclSuccess;
 }
 
+ncclResult_t ncclSharpRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+  ncclSharpRegMr(comm, data, size, type, mhandle);
+}
+
 ncclResult_t ncclSharpDeregMr(void* collComm, void* mhandle) {
   struct ncclSharpCollComm* cComm = (struct ncclSharpCollComm*)collComm;
   struct ncclSharpMemHandle *mh = (struct ncclSharpMemHandle *)mhandle;
@@ -540,6 +544,7 @@ ncclCollNet_t NCCL_COLLNET_PLUGIN_SYMBOL = {
   ncclSharpConnect,
   ncclSharpReduceSupport,
   ncclSharpRegMr,
+  ncclSharpRegMrDmaBuf,
   ncclSharpDeregMr,
   ncclSharpIallreduce,
   ncclSharpIflush,
