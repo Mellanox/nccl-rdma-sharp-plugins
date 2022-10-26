@@ -112,6 +112,32 @@ ncclResult_t nccl_p2p_gdr_support(int dev)
   return ncclSuccess;
 }
 
+// Detect whether DMA-BUF support is present in the kernel
+// Returns :
+// ncclSuccess : DMA-BUF support is available
+// ncclSystemError : DMA-BUF is not supported by the kernel
+ncclResult_t nccl_p2p_dmabuf_support(int dev) {
+  static int dmaBufSupported = -1;
+  if (dmaBufSupported == -1) {
+    ncclResult_t res;
+    struct ibv_pd* pd;
+    struct ibv_context* ctx;
+    ctx = ncclIbDevs[dev].context;
+    NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
+    // Test kernel DMA-BUF support with a dummy call (fd=-1)
+    (void) wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL/*offset*/, 0ULL/*len*/, 0ULL/*iova*/, -1/*fd*/, 0/*flags*/);
+    // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
+    dmaBufSupported = (errno != EOPNOTSUPP && errno != EPROTONOSUPPORT) ? 1 : 0;
+    NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
+  }
+  if (dmaBufSupported == 0) return ncclSystemError;
+  return ncclSuccess;
+failure:
+  dmaBufSupported = 0;
+  return ncclSystemError;
+}
+
+
 ncclResult_t nccl_p2p_ib_get_properties(nccl_ib_dev_t *devs, int dev, ncclNetProperties_t* props)
 {
   props->name         = devs[dev].devName;
@@ -123,6 +149,13 @@ ncclResult_t nccl_p2p_ib_get_properties(nccl_ib_dev_t *devs, int dev, ncclNetPro
   } else {
     props->ptrSupport |= NCCL_PTR_CUDA;
   }
+  if (nccl_p2p_gdr_support(dev) == ncclSuccess) {
+    props->ptrSupport |= NCCL_PTR_CUDA; // GDR support via nv_peermem
+  }
+  if (p2p_plugin == NCCL_P2P_IB && nccl_p2p_dmabuf_support(dev) == ncclSuccess) {
+    props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
+  }
+
   props->speed        = devs[dev].speed;
   props->latency      = 0; // Not set
   props->port         = devs[dev].port + devs[dev].realPort;
@@ -306,7 +339,7 @@ ncclResult_t nccl_p2p_ib_pci_path(nccl_ib_dev_t *devs, int num_devs, char* dev_n
   return ncclSuccess;
 }
 
-static int ibv_widths[] = { 1, 4, 8, 12 };
+static int ibv_widths[] = { 1, 4, 8, 12, 2};
 static int ibv_speeds[] = { 2500, 5000, 10000, 10000, 14000, 25000, 50000 };
 
 static int first_bit_set(int val, int max) {

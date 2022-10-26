@@ -565,6 +565,10 @@ ncclResult_t nccl_ucx_deregmr(void* comm, void* mhandle) {
   return ncclSuccess;
 }
 
+ncclResult_t nccl_ucx_regmr_dmabuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+	return nccl_ucx_regmr(comm, data, size, type, mhandle);
+}
+
 ncclResult_t ucx_send_check(ucx_send_comm_t *comm) {
   ucp_tag_message_h     msg_tag;
   ucp_tag_recv_info_t   info_tag;
@@ -857,6 +861,7 @@ ncclNet_t ucxPlugin = {
   nccl_ucx_connect,
   nccl_ucx_accept,
   nccl_ucx_regmr,
+  nccl_ucx_regmr_dmabuf,
   nccl_ucx_deregmr,
   nccl_ucx_isend,
   nccl_ucx_irecv,

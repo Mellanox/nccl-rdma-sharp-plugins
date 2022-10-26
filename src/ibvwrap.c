@@ -118,12 +118,30 @@ ncclResult_t wrap_ibv_reg_mr_iova2(struct ibv_mr **ret, struct ibv_pd *pd, void 
 #endif
 }
 
+/* DMA-BUF support */
+ncclResult_t wrap_ibv_reg_dmabuf_mr(struct ibv_mr **ret, struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access) {
+#if HAVE_DECL_IBV_REG_DMABUF_MR
+  IBV_PTR_CHECK_ERRNO(ibv_reg_dmabuf_mr(pd, offset, length, iova, fd, access), *ret, NULL, "ibv_reg_dmabuf_mr");
+#else
+  return ncclSystemError;
+#endif
+}
+
+struct ibv_mr * wrap_direct_ibv_reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access) {
+#if HAVE_DECL_IBV_REG_DMABUF_MR
+  return ibv_reg_dmabuf_mr(pd, offset, length, iova, fd, access);
+#else
+  errno = EOPNOTSUPP; // ncclIbDmaBufSupport() requires this errno being set
+  return NULL;
+#endif
+}
+
 ncclResult_t wrap_ibv_dereg_mr(struct ibv_mr *mr) { /*returns 0 on success, or the value of errno on failure (which indicates the failure reason)*/
   IBV_INT_CHECK_RET_ERRNO(ibv_dereg_mr(mr), 0, "ibv_dereg_mr");
 }
 
 ncclResult_t wrap_ibv_create_cq(struct ibv_cq **ret, struct ibv_context *context, int cqe, void *cq_context, struct ibv_comp_channel *channel, int comp_vector) {
-  IBV_PTR_CHECK(ibv_create_cq(context, cqe, cq_context, channel, comp_vector), *ret, NULL, "ibv_create_cq");
+  IBV_PTR_CHECK_ERRNO(ibv_create_cq(context, cqe, cq_context, channel, comp_vector), *ret, NULL, "ibv_create_cq");
 }
 
 ncclResult_t wrap_ibv_destroy_cq(struct ibv_cq *cq) {
@@ -135,7 +153,7 @@ ncclResult_t wrap_ibv_destroy_qp(struct ibv_qp *qp) {
 }
 
 ncclResult_t wrap_ibv_create_qp(struct ibv_qp **ret, struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) {
-  IBV_PTR_CHECK(ibv_create_qp(pd, qp_init_attr), *ret, NULL, "ibv_create_qp");
+  IBV_PTR_CHECK_ERRNO(ibv_create_qp(pd, qp_init_attr), *ret, NULL, "ibv_create_qp");
 }
 
 ncclResult_t wrap_ibv_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) { /*returns 0 on success, or the value of errno on failure (which indicates the failure reason)*/
