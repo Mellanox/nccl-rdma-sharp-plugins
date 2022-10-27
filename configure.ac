@@ -1,11 +1,11 @@
 #
-# Copyright (C) Mellanox Technologies Ltd. 2019.  ALL RIGHTS RESERVED.
+# Copyright (c) 2019, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See file LICENSE for terms.
 #
 AC_PREREQ([2.63])
 
-AC_COPYRIGHT([Copyright (C) 2019 Mellanox Technologies Ltd. All rights reserved.])
+AC_COPYRIGHT([Copyright (c) 2019, NVIDIA CORPORATION & AFFILIATES. All rights reserved.])
 
 define([nccl_rdma_sharp_plugins_ver_major], 1)
 define([nccl_rdma_sharp_plugins_ver_minor], 0)

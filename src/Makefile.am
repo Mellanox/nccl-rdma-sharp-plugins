@@ -1,5 +1,5 @@
 #
-# Copyright (C) Mellanox Technologies Ltd. 2019-2020.  ALL RIGHTS RESERVED.
+# Copyright (c) 2019-2020, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # See file LICENSE for terms.
 #
 
@@ -13,6 +13,8 @@ libnccl_net_la_LDFLAGS  = $(LDFLAGS)
 libnccl_net_la_SOURCES = \
 	ibvwrap.c \
 	utils.c	\
+        param.c \
+	socket.c \
 	p2p_plugin.c \
 	ib_plugin.c
 

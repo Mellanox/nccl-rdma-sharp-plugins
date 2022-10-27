@@ -1,12 +1,10 @@
 /*************************************************************************
- * Copyright (c) 2016-2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2018, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
 
 #define _GNU_SOURCE
-#include "utils.h"
-#include "core.h"
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
@@ -14,6 +12,11 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <dlfcn.h>
+#include <assert.h>
+#include <stdbool.h>
+#include "utils.h"
+#include "core.h"
+#include "param.h"
 
 // Allocate memory to be potentially ibv_reg_mr'd. This needs to be
 // allocated on separate pages as those pages will be marked DONTFORK
@@ -28,6 +31,25 @@ ncclResult_t ncclIbMalloc(void** ptr, size_t size) {
   *ptr = p;
   return ncclSuccess;
 }
+
+ncclResult_t ncclRealloc(void **ptr, size_t oldNelem, size_t nelem) {
+  if (nelem < oldNelem) return ncclInternalError;
+  if (nelem == oldNelem) return ncclSuccess;
+
+  void* oldp = *ptr;
+  void* p = (void*)malloc(nelem);
+  if (p == NULL) {
+    WARN("Failed to malloc %ld bytes", nelem);
+    return ncclSystemError;
+  }
+  memcpy(p, oldp, oldNelem);
+  free(oldp);
+  memset(p+oldNelem, 0, (nelem-oldNelem));
+  *ptr = p;
+  INFO(NCCL_ALLOC, "Mem Realloc old size %ld, new size %ld pointer %p", oldNelem, nelem, *ptr);
+  return ncclSuccess;
+}
+
 
 int parseStringList(const char* string, struct netIf* ifList, int maxList) {
   if (!string) return 0;
@@ -151,4 +173,20 @@ const char *get_plugin_lib_path()
   if (ret == 0) return NULL;
 
   return dl_info.dli_fname;
+}
+
+NCCL_PARAM(SetThreadName, "SET_THREAD_NAME", 0);
+
+void ncclSetThreadName(pthread_t thread, const char *fmt, ...) {
+  // pthread_setname_np is nonstandard GNU extension
+  // needs the following feature test macro
+#ifdef _GNU_SOURCE
+  if (ncclParamSetThreadName() != 1) return;
+  char threadName[NCCL_THREAD_NAMELEN];
+  va_list vargs;
+  va_start(vargs, fmt);
+  vsnprintf(threadName, NCCL_THREAD_NAMELEN, fmt, vargs);
+  va_end(vargs);
+  pthread_setname_np(thread, threadName);
+#endif
 }

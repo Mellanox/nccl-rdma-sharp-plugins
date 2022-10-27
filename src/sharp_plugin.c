@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2020, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2020, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -10,7 +10,9 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <assert.h>
 
+#include "config.h"
 #include "core.h"
 #include "nccl.h"
 #include "nccl_net.h"
@@ -22,7 +24,10 @@
 
 extern ncclNet_t NCCL_PLUGIN_SYMBOL;
 int ncclNSharpDevs = -1;
+struct sharp_coll_caps sharp_caps;
+static int ncclSharpV3DatatypesSupported = 0;
 NCCL_PARAM(SharpGroupSizeThresh, "SHARP_GROUP_SIZE_THRESH", 2);
+NCCL_PARAM(SharpV3Datatypes, "SHARP_V3_DATATYPES", 2);
 
 enum ncclSharpRequestType {
   NCCL_SHARP_REQ_SHARP_COLL,
@@ -71,6 +76,11 @@ static __inline__ enum sharp_datatype typeConvert(ncclDataType_t type) {
     case ncclInt64: return SHARP_DTYPE_LONG;
     case ncclUint64: return SHARP_DTYPE_UNSIGNED_LONG;
     case ncclFloat64: return SHARP_DTYPE_DOUBLE;
+#ifdef HAVE_SHARP_DTYPE_BFLOAT16_UINT8_INT8
+    case ncclBfloat16: return (ncclSharpV3DatatypesSupported ? SHARP_DTYPE_BFLOAT16 : SHARP_DTYPE_NULL);
+    case ncclInt8: return (ncclSharpV3DatatypesSupported ? SHARP_DTYPE_INT8 : SHARP_DTYPE_NULL);
+    case ncclUint8: return (ncclSharpV3DatatypesSupported ? SHARP_DTYPE_UINT8 : SHARP_DTYPE_NULL);
+#endif
     default: return SHARP_DTYPE_NULL;
   }
 }
@@ -84,6 +94,9 @@ static __inline__ int typeSize(ncclDataType_t type) {
     case ncclInt64: return 8;
     case ncclUint64: return 8;
     case ncclFloat64: return 8;
+    case ncclBfloat16: return 2;
+    case ncclInt8: return 1;
+    case ncclUint8: return 1;
     default:
       WARN("SHARP: unsupported data type\n");
       return -1;
@@ -104,6 +117,9 @@ int ncclSharpAllGather(void *context, void *buf, int len) {
   nccl_p2p_plugin_t p2p_plugin;
   void* rMhandle = NULL, *sMhandle = NULL;
 
+  assert(cComm->recvComm != NULL);
+  assert(cComm->sendComm != NULL);
+
   p2p_plugin = nccl_p2p_get_plugin_type();
   if (p2p_plugin != NCCL_P2P_UCX) {
     NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->recvComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &rMhandle));
@@ -115,8 +131,10 @@ int ncclSharpAllGather(void *context, void *buf, int len) {
     void* srequest = NULL, *rrequest = NULL;
     int rpeer = (speer-1+cComm->nranks)%cComm->nranks;
     while (srequest == NULL || rrequest == NULL) {
-       if (srequest == NULL) NCCLCHECK(NCCL_PLUGIN_SYMBOL.isend(cComm->sendComm, ((char*)buf)+speer*len, len, sMhandle, &srequest));
-       if (rrequest == NULL) NCCLCHECK(NCCL_PLUGIN_SYMBOL.irecv(cComm->recvComm, ((char*)buf)+rpeer*len, len, rMhandle, &rrequest));
+       void *rbuf = ((char*)buf)+rpeer*len;
+       int tag = 0x69;
+       if (srequest == NULL) NCCLCHECK(NCCL_PLUGIN_SYMBOL.isend(cComm->sendComm, ((char*)buf)+speer*len, len, tag, sMhandle, &srequest));
+       if (rrequest == NULL) NCCLCHECK(NCCL_PLUGIN_SYMBOL.irecv(cComm->recvComm, 1, &rbuf, &len, &tag, &rMhandle, &rrequest));
     }
     while (srequest || rrequest) {
       int done;
@@ -236,8 +254,13 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
     return ncclInternalError;
   }
   int next = (cComm->rank + 1) % nranks;
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.connect(lComm->dev, handles[next], &cComm->sendComm));
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.accept(lComm->listenCommP2P, &cComm->recvComm)); // From prev
+  do {
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.connect(lComm->dev, handles[next], &cComm->sendComm));
+  } while(cComm->sendComm == NULL);
+
+  do {
+    NCCLCHECK(NCCL_PLUGIN_SYMBOL.accept(lComm->listenCommP2P, &cComm->recvComm)); // From prev
+  } while(cComm->recvComm == NULL);
 
   struct ncclSharpInfo* allInfo;
   pid_t pid = getpid();
@@ -282,12 +305,30 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
 
   int ret = sharp_coll_init(&init_spec, &cComm->sharpCollContext);
 
-  INFO(NCCL_INIT, "Sharp rank %d/%d initialized on %s", cComm->rank, nranks, devName);
 
   if (ret < 0) {
-    WARN("NET/IB :SHARP coll init error: %s(%d)\n", sharp_coll_strerror(ret), ret);
+    WARN("NET/IB : SHARP coll init error: %s(%d)\n", sharp_coll_strerror(ret), ret);
     return ncclInternalError;
   }
+
+#ifdef HAVE_SHARP_DTYPE_BFLOAT16_UINT8_INT8
+  ret = sharp_coll_caps_query(cComm->sharpCollContext, &sharp_caps);
+  if (ret < 0) {
+    WARN("sharp_coll_caps_query failed : %s(%d)\n", sharp_coll_strerror(ret), ret);
+    sharp_coll_finalize(cComm->sharpCollContext);
+    return ncclInternalError;
+  }
+
+  int v3DatatypeMode = ncclParamSharpV3Datatypes();
+  if (v3DatatypeMode == 1 || v3DatatypeMode == 2) {
+    if (sharp_caps.support_mask.dtypes & (1<<SHARP_DTYPE_INT8))
+      ncclSharpV3DatatypesSupported = 1;
+    else
+      WARN("SHARP int8,uint8,bfloat16 Datatypes not supported");
+  }
+#endif
+
+  INFO(NCCL_INIT, "SHARP rank %d/%d initialized on %s", cComm->rank, nranks, devName);
 
   struct sharp_coll_comm_init_spec comm_spec;
   comm_spec.rank = cComm->rank;
@@ -426,7 +467,7 @@ ncclResult_t ncclSharpIflush(void* collComm, void* data, int size, void* mhandle
 
   NCCLCHECK(ncclSharpGetRequest(cComm->reqs, &req));
   req->requestType = NCCL_SHARP_REQ_IFLUSH;
-  NCCL_PLUGIN_SYMBOL.iflush(cComm->recvComm, data, size, mh->ncclIbMr, &req->sharpRequest);
+  NCCL_PLUGIN_SYMBOL.iflush(cComm->recvComm, 1, &data, &size, &mh->ncclIbMr, &req->sharpRequest);
   if (!req->sharpRequest) {
     *request = NULL;
      req->used = 0;

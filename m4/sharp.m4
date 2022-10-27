@@ -1,5 +1,5 @@
 #
-# Copyright (C) Mellanox Technologies Ltd. 2001-2020.  ALL RIGHTS RESERVED.
+# Copyright (c) 2001-2020, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # See file LICENSE for terms.
 #
 
@@ -78,6 +78,9 @@ AS_IF([test "x$sharp_checked" != "xyes"],[
             ])
 
             AC_SUBST(SHARP_LIBADD, "-lsharp_coll")
+            AC_CHECK_DECLS([SHARP_DTYPE_BFLOAT16], [AC_DEFINE([HAVE_SHARP_DTYPE_BFLOAT16_UINT8_INT8], 1,
+                                                    [SHARP v3 datatypes : bfloat16, uint8, int8])], [],
+                           [[#include <sharp/api/sharp_coll.h>]])
         ],
         [
             AS_IF([test "x$with_sharp" != "xguess"],

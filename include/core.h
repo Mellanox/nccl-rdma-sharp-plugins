@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015-2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2018, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -72,5 +72,41 @@
     goto label; \
   } \
 } while (0);
+
+#define NEQCHECK(statement, value) do {   \
+  if ((statement) != value) {             \
+    /* Print the back trace*/             \
+    INFO(NCCL_ALL,"%s:%d -> %d", __FILE__, __LINE__, ncclSystemError);    \
+    return ncclSystemError;     \
+  }                             \
+} while (0);
+
+#define NEQCHECKGOTO(statement, value, res, label) do { \
+  if ((statement) != value) { \
+    /* Print the back trace*/ \
+    res = ncclSystemError;    \
+    INFO(NCCL_ALL,"%s:%d -> %d", __FILE__, __LINE__, res);    \
+    goto label; \
+  } \
+} while (0);
+
+#define EQCHECK(statement, value) do {    \
+  if ((statement) == value) {             \
+    /* Print the back trace*/             \
+    INFO(NCCL_ALL,"%s:%d -> %d", __FILE__, __LINE__, ncclSystemError);    \
+    return ncclSystemError;     \
+  }                             \
+} while (0);
+
+#define EQCHECKGOTO(statement, value, res, label) do { \
+  if ((statement) == value) { \
+    /* Print the back trace*/ \
+    res = ncclSystemError;    \
+    INFO(NCCL_ALL,"%s:%d -> %d", __FILE__, __LINE__, res);    \
+    goto label; \
+  } \
+} while (0);
+
+
 
 #endif // end include guard

@@ -332,6 +332,7 @@ verify_sharp() {
             -x HCOLL_ML_DISABLE_REDUCE=1 \
             -x HCOLL_ENABLE_MCAST_ALL=1 \
             -x HCOLL_MCAST_NP=1 \
+            -x HCOLL_MCAST_VERBOSE=1 \
             -x LD_LIBRARY_PATH \
             -x HCOLL_ENABLE_SHARP=2 \
             -x SHARP_COLL_LOG_LEVEL=3 \
