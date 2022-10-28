@@ -78,7 +78,7 @@ make -j clean
 
 make -j CUDA_HOME="${CUDA_HOME}" NCCL_HOME="${NCCL_DIR}" MPI=1 MPI_HOME="${MPI_HOME}"
 
-export LD_LIBRARY_PATH="${NCCL_RDMA_SHARP_PLUGINS_DIR}/lib:${LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${NCCL_RDMA_SHARP_PLUGINS_DIR}/lib:${LD_LIBRARY_PATH}"
 
 trim_multiple_spaces() {
     echo "$1" | sed -s "s|\ \ *| |g"
