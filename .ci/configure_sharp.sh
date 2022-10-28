@@ -12,7 +12,7 @@ then
     exit 1
 fi
 
-export LD_LIBRARY_PATH="${NCCL_RDMA_SHARP_PLUGINS_DIR}/lib:${LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${NCCL_RDMA_SHARP_PLUGINS_DIR}/lib:${LD_LIBRARY_PATH}"
 
 # 1 - run sanity tests, 0 - do not run
 VERIFY_SHARP_ENABLE=${VERIFY_SHARP_ENABLE:-1}

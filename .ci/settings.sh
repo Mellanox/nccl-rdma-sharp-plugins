@@ -1,6 +1,7 @@
 #!/bin/bash -leE
 # PLUGINS
 echo "INFO: DEBUG = $DEBUG"
+DEBUG=true
 if [ "$DEBUG" = "true" ]
 then
     set -x
@@ -13,8 +14,8 @@ fi
 
 # TODO remove use HPC-X which is already inside the image
 
-module load /hpc/local/etc/modulefiles/dev/cuda-latest
-HPCX_UBUNTU_INSTALL_DIR=${HPCX_UBUNTU_INSTALL_DIR:-/hpc/noarch/HPCX/unpacked/hpcx-v2.10.1-gcc-MLNX_OFED_LINUX-5-ubuntu20.04-cuda11-gdrcopy2-nccl2.11-x86_64/}
+#module load /hpc/local/etc/modulefiles/dev/cuda-latest
+HPCX_UBUNTU_INSTALL_DIR=${HPCX_UBUNTU_INSTALL_DIR:-/hpc/noarch/HPCX/unpacked/hpcx-v2.13-gcc-MLNX_OFED_LINUX-5-ubuntu20.04-cuda11-gdrcopy2-nccl2.12-x86_64/}
 module load "${HPCX_UBUNTU_INSTALL_DIR}"/modulefiles/hpcx-ompi
 # . "${HPCX_UBUNTU_INSTALL_DIR}/hpcx-init.sh"
 # hpcx_load
@@ -22,6 +23,7 @@ module load "${HPCX_UBUNTU_INSTALL_DIR}"/modulefiles/hpcx-ompi
 # It is needed to disable nccl_rdma_sharp_plugin libs from HPC-X
 LD_LIBRARY_PATH="${LD_LIBRARY_PATH//nccl_rdma_sharp_plugin/nccl_rdma_sharp_pluginX}"
 export LD_LIBRARY_PATH
+CUDA_HOME=/usr/local/cuda
 
 export NCCL_RDMA_SHARP_PLUGINS_DIR="${NCCL_RDMA_SHARP_PLUGINS_DIR:-${WORKSPACE}/_install}"
 echo "INFO: NCCL_RDMA_SHARP_PLUGINS_DIR = ${NCCL_RDMA_SHARP_PLUGINS_DIR}"
