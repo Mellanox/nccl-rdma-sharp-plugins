@@ -383,7 +383,11 @@ ib_connect_check:
 
   qpInfo.lid = portAttr.lid;
   qpInfo.link_layer = portAttr.link_layer;
-  qpInfo.is_global = (ncclParamIbIsGlobal() || (portAttr.flags & IBV_QPF_GRH_REQUIRED));
+  qpInfo.is_global = (ncclParamIbIsGlobal()
+#if HAVE_DECL_IBV_QPF_GRH_REQUIRED
+                     || (portAttr.flags & IBV_QPF_GRH_REQUIRED)
+#endif
+    );
   if (qpInfo.link_layer == IBV_LINK_LAYER_INFINIBAND && !qpInfo.is_global) { // IB
     for (int q=0; q<comm->nqps; q++)
       INFO(NCCL_NET,"NET/IB: Dev %d Port %d qpn %d mtu %d LID %d", dev, ib_port, qpInfo.qpn[q], qpInfo.mtu, qpInfo.lid);
@@ -499,7 +503,11 @@ ib_recv:
     localQpInfo.ib_port=ib_port;
     localQpInfo.spn=gid.global.subnet_prefix;
     localQpInfo.iid=gid.global.interface_id;
-    localQpInfo.is_global=(ncclParamIbIsGlobal() || (portAttr.flags & IBV_QPF_GRH_REQUIRED)),
+    localQpInfo.is_global=(ncclParamIbIsGlobal()
+#if HAVE_DECL_IBV_QPF_GRH_REQUIRED
+                     || (portAttr.flags & IBV_QPF_GRH_REQUIRED)
+#endif
+      );
     localQpInfo.mtu=portAttr.active_mtu;
     NCCLCHECK(ncclIbRtrQp(rComm->gpuFlush.qp, rComm->gpuFlush.qp->qp_num, &localQpInfo));
     NCCLCHECK(ncclIbRtsQp(rComm->gpuFlush.qp));
@@ -513,7 +521,11 @@ ib_recv:
   for (int q=0; q<rComm->nqps; q++) qpInfo.qpn[q]=rComm->qps[q]->qp_num;
   qpInfo.spn=gid.global.subnet_prefix;
   qpInfo.iid=gid.global.interface_id;
-  qpInfo.is_global=(ncclParamIbIsGlobal() || (portAttr.flags & IBV_QPF_GRH_REQUIRED)),
+  qpInfo.is_global=(ncclParamIbIsGlobal()
+#if HAVE_DECL_IBV_QPF_GRH_REQUIRED
+                     || (portAttr.flags & IBV_QPF_GRH_REQUIRED)
+#endif
+      );
   qpInfo.mtu=remQpInfo.mtu;
 
   stage->state = ncclIbCommStateSend;
