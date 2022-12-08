@@ -14,7 +14,7 @@
 #include <assert.h>
 
 #include "nccl.h"
-#include "nccl_net.h"
+#include "net.h"
 #include "ibvwrap.h"
 #include "param.h"
 #include "socket.h"

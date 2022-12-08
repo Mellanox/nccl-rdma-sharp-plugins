@@ -11,17 +11,21 @@
 #include <sys/types.h>
 #include <sys/time.h>
 
-#include "nccl.h"
-#include "nccl_net.h"
 #include "debug.h"
 #include "p2p_plugin.h"
 
 #ifdef HAVE_UCX_PLUGIN
-extern ncclNet_t ucxPlugin;
-extern ncclNet_t ucxRmaPlugin;
+extern ncclNet_v6_t ucxPlugin_v6;
+extern ncclNet_v5_t ucxPlugin_v5;
+extern ncclNet_v4_t ucxPlugin_v4;
+extern ncclNet_v6_t ucxRmaPlugin_v6;
+extern ncclNet_v5_t ucxRmaPlugin_v5;
+extern ncclNet_v4_t ucxRmaPlugin_v4;
 #endif
 
-extern ncclNet_t ibPlugin;
+extern ncclNet_v6_t ibPlugin_v6;
+extern ncclNet_v5_t ibPlugin_v5;
+extern ncclNet_v4_t ibPlugin_v4;
 pthread_mutex_t nccl_p2p_lock = PTHREAD_MUTEX_INITIALIZER;
 
 ncclDebugLogger_t pluginLogFunction;
@@ -37,23 +41,21 @@ NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
 
 ncclResult_t pluginInit(ncclDebugLogger_t logFunction);
 
-ncclNet_t NCCL_PLUGIN_SYMBOL = {
-  "NCCL RDMA Plugin",
+ncclNet_v6_t ncclNetPlugin_v6 = {
+  "NCCL RDMA Plugin v6",
   pluginInit,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL
+};
+
+
+ncclNet_v5_t ncclNetPlugin_v5 = {
+  "NCCL RDMA Plugin v5",
+  pluginInit,
+};
+
+
+ncclNet_v4_t ncclNetPlugin_v4 = {
+  "NCCL RDMA Plugin v4",
+  pluginInit,
 };
 
 static nccl_p2p_plugin_t p2p_plugin = NCCL_P2P_LAST;
@@ -61,13 +63,13 @@ static nccl_p2p_plugin_t p2p_plugin = NCCL_P2P_LAST;
 ncclResult_t pluginInit(ncclDebugLogger_t logFunction)
 {
   pluginLogFunction = logFunction;
+
   p2p_plugin = NCCL_P2P_IB;
   const char *plugin_path = get_plugin_lib_path();
   if (plugin_path != NULL) {
     INFO(NCCL_INIT|NCCL_NET, "Plugin Path : %s", plugin_path);;
   }
 
-  NCCL_PLUGIN_SYMBOL = ibPlugin;
   const char *p2p_layer = getenv("NCCL_PLUGIN_P2P");
   if (p2p_layer != NULL) {
     if (!strcasecmp(p2p_layer, "ib")) p2p_plugin = NCCL_P2P_IB;
@@ -81,19 +83,25 @@ ncclResult_t pluginInit(ncclDebugLogger_t logFunction)
   }
   switch (p2p_plugin) {
     case NCCL_P2P_IB:
-      NCCL_PLUGIN_SYMBOL = ibPlugin;
+      ncclNetPlugin_v6 = ibPlugin_v6;
+      ncclNetPlugin_v5 = ibPlugin_v5;
+      ncclNetPlugin_v4 = ibPlugin_v4;
       break;
 #ifdef HAVE_UCX_PLUGIN
     case NCCL_P2P_UCX:
-      NCCL_PLUGIN_SYMBOL = ucxPlugin;
+      ncclNetPlugin_v6 = ucxPlugin_v6;
+      ncclNetPlugin_v5 = ucxPlugin_v5;
+      ncclNetPlugin_v4 = ucxPlugin_v4;
       break;
     case NCCL_P2P_UCX_RMA:
-      NCCL_PLUGIN_SYMBOL = ucxRmaPlugin;
+      ncclNetPlugin_v6 = ucxRmaPlugin_v6;
+      ncclNetPlugin_v5 = ucxRmaPlugin_v5;
+      ncclNetPlugin_v4 = ucxRmaPlugin_v4;
       break;
 #endif
   }
-  INFO(NCCL_INIT|NCCL_NET, "P2P plugin %s", NCCL_PLUGIN_SYMBOL.name);
 
+  INFO(NCCL_INIT|NCCL_NET, "P2P plugin %s", NCCL_PLUGIN_SYMBOL.name);
   return NCCL_PLUGIN_SYMBOL.init(logFunction);
 }
 
