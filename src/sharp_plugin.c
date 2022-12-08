@@ -14,15 +14,16 @@
 
 #include "config.h"
 #include "core.h"
-#include "nccl.h"
-#include "nccl_net.h"
 #include "p2p_plugin.h"
 #include "param.h"
 #include "sharp/api/version.h"
 #include "sharp/api/sharp_coll.h"
 #include "utils.h"
 
-extern ncclNet_t NCCL_PLUGIN_SYMBOL;
+extern ncclNet_v6_t ncclNetPlugin_v6;
+extern ncclNet_v5_t ncclNetPlugin_v5;
+extern ncclNet_v4_t ncclNetPlugin_v4;
+
 int ncclNSharpDevs = -1;
 struct sharp_coll_caps sharp_caps;
 static int ncclSharpV3DatatypesSupported = 0;
@@ -210,9 +211,18 @@ ncclResult_t ncclSharpDevices(int* ndev) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclSharpGetProperties(int dev, ncclNetProperties_t* props) {
+ncclResult_t ncclSharpGetProperties_v6(int dev, ncclNetProperties_v6_t* props) {
   return NCCL_PLUGIN_SYMBOL.getProperties(dev, props);
 }
+
+ncclResult_t ncclSharpGetProperties_v5(int dev, ncclNetProperties_v5_t* props) {
+  return ncclNetPlugin_v5.getProperties(dev, props);
+}
+
+ncclResult_t ncclSharpGetProperties_v4(int dev, ncclNetProperties_v4_t* props) {
+  return ncclNetPlugin_v4.getProperties(dev, props);
+}
+
 
 ncclResult_t ncclSharpListen(int dev, void* opaqueHandle, void** listenComm) {
   struct ncclSharpListenComm *lComm;
@@ -298,8 +308,8 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
   init_spec.config.user_progress_num_polls = 10000000;
 
   char devName[MAXNAMESIZE];
-  ncclNetProperties_t prop;
-  ncclSharpGetProperties(lComm->dev, &prop);
+  ncclNetProperties_v6_t prop;
+  ncclSharpGetProperties_v6(lComm->dev, &prop);
   snprintf(devName, MAXNAMESIZE, "%s:%d", prop.name, prop.port);
   init_spec.config.ib_dev_list = devName;
 
@@ -535,16 +545,50 @@ ncclResult_t ncclSharpCloseListen(void* listenComm) {
   return status;
 }
 
-ncclCollNet_t NCCL_COLLNET_PLUGIN_SYMBOL = {
+ncclCollNet_v6_t ncclCollNetPlugin_v6 = {
   "SHARP",
   ncclSharpInit,
   ncclSharpDevices,
-  ncclSharpGetProperties,
+  ncclSharpGetProperties_v6,
   ncclSharpListen,
   ncclSharpConnect,
   ncclSharpReduceSupport,
   ncclSharpRegMr,
   ncclSharpRegMrDmaBuf,
+  ncclSharpDeregMr,
+  ncclSharpIallreduce,
+  ncclSharpIflush,
+  ncclSharpTest,
+  ncclSharpCloseColl,
+  ncclSharpCloseListen
+};
+
+ncclCollNet_v5_t ncclCollNetPlugin_v5 = {
+  "SHARP",
+  ncclSharpInit,
+  ncclSharpDevices,
+  ncclSharpGetProperties_v5,
+  ncclSharpListen,
+  ncclSharpConnect,
+  ncclSharpReduceSupport,
+  ncclSharpRegMr,
+  ncclSharpDeregMr,
+  ncclSharpIallreduce,
+  ncclSharpIflush,
+  ncclSharpTest,
+  ncclSharpCloseColl,
+  ncclSharpCloseListen
+};
+
+ncclCollNet_v4_t ncclCollNetPlugin_v4 = {
+  "SHARP",
+  ncclSharpInit,
+  ncclSharpDevices,
+  ncclSharpGetProperties_v4,
+  ncclSharpListen,
+  ncclSharpConnect,
+  ncclSharpReduceSupport,
+  ncclSharpRegMr,
   ncclSharpDeregMr,
   ncclSharpIallreduce,
   ncclSharpIflush,

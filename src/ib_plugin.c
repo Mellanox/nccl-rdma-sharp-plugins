@@ -14,8 +14,6 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "nccl.h"
-#include "nccl_net.h"
 #include "p2p_plugin.h"
 #include "core.h"
 #include "socket.h"
@@ -1066,22 +1064,99 @@ ncclResult_t ncclIbCloseListen(void* listenComm) {
   return ncclSuccess;
 }
 
-ncclNet_t ibPlugin = {
-  "IBext",
-  ncclIbInit,
-  ncclIbDevices,
-  ncclIbGetProperties,
-  ncclIbListen,
-  ncclIbConnect,
-  ncclIbAccept,
-  ncclIbRegMr,
-  ncclIbRegMrDmaBuf,
-  ncclIbDeregMr,
-  ncclIbIsend,
-  ncclIbIrecv,
-  ncclIbIflush,
-  ncclIbTest,
-  ncclIbCloseSend,
-  ncclIbCloseRecv,
-  ncclIbCloseListen
+const ncclNet_v6_t ibPlugin_v6 = {
+  .name = "IBext",
+  .init = ncclIbInit,
+  .devices = ncclIbDevices,
+  .getProperties = ncclIbGetProperties,
+  .listen = ncclIbListen,
+  .connect = ncclIbConnect,
+  .accept = ncclIbAccept,
+  .regMr = ncclIbRegMr,
+  .regMrDmaBuf = ncclIbRegMrDmaBuf,
+  .deregMr = ncclIbDeregMr,
+  .isend = ncclIbIsend,
+  .irecv = ncclIbIrecv,
+  .iflush = ncclIbIflush,
+  .test = ncclIbTest,
+  .closeSend = ncclIbCloseSend,
+  .closeRecv = ncclIbCloseRecv,
+  .closeListen = ncclIbCloseListen,
+};
+
+const ncclNet_v5_t ibPlugin_v5 = {
+  .name = "IBext",
+  .init = ncclIbInit,
+  .devices = ncclIbDevices,
+  .getProperties = ncclIbGetProperties,
+  .listen = ncclIbListen,
+  .connect = ncclIbConnect,
+  .accept = ncclIbAccept,
+  .regMr = ncclIbRegMr,
+  .deregMr = ncclIbDeregMr,
+  .isend = ncclIbIsend,
+  .irecv = ncclIbIrecv,
+  .iflush = ncclIbIflush,
+  .test = ncclIbTest,
+  .closeSend = ncclIbCloseSend,
+  .closeRecv = ncclIbCloseRecv,
+  .closeListen = ncclIbCloseListen,
+};
+
+static ncclResult_t ncclIbGetProperties_v4(int dev, ncclNetProperties_v4_t* props) {
+  ncclNetProperties_v6_t props_v6;
+  ncclResult_t ret = ncclIbGetProperties(dev, &props_v6);
+  if (ret != ncclSuccess) return ret;
+  props->name = props_v6.name;
+  props->pciPath = props_v6.pciPath;
+  props->guid = props_v6.guid;
+  props->ptrSupport = props_v6.ptrSupport;
+  props->speed = props_v6.speed;
+  props->port = props_v6.port;
+  props->maxComms = props_v6.maxComms;
+  return ncclSuccess;
+}
+static ncclResult_t ncclIbIsend_v4(void *sendComm, void* data, int size, void *mhandle, void** request) {
+  return ncclIbIsend(sendComm, data, size, 0, mhandle, request);
+}
+static ncclResult_t ncclIbIrecv_v4(void* recvComm, void* data, int size, void* mhandle, void** request) {
+  int tag = 0;
+  return ncclIbIrecv(recvComm, 1, &data, &size, &tag, &mhandle, request);
+}
+static ncclResult_t ncclIbIflush_v4(void* recvComm, void* data, int size, void* mhandle, void** request) {
+  return ncclIbIflush(recvComm, 1, &data, &size, &mhandle, request);
+}
+static ncclResult_t ncclIbConnect_v4(int dev, void* handle, void** sendComm) {
+  ncclResult_t ret;
+  do {
+    ret = ncclIbConnect(dev, handle, sendComm);
+  } while (ret == ncclSuccess && *sendComm == NULL);
+  return ret;
+}
+static ncclResult_t ncclIbAccept_v4(void* listenComm, void** recvComm) {
+  ncclResult_t ret;
+  do {
+    ret = ncclIbAccept(listenComm, recvComm);
+  } while (ret == ncclSuccess && *recvComm == NULL);
+  return ret;
+}
+
+
+const ncclNet_v4_t ibPlugin_v4 = {
+  .name = "IBext",
+  .init = ncclIbInit,
+  .devices = ncclIbDevices,
+  .getProperties = ncclIbGetProperties_v4,
+  .listen = ncclIbListen,
+  .connect = ncclIbConnect_v4,
+  .accept = ncclIbAccept_v4,
+  .regMr = ncclIbRegMr,
+  .deregMr = ncclIbDeregMr,
+  .isend = ncclIbIsend_v4,
+  .irecv = ncclIbIrecv_v4,
+  .iflush = ncclIbIflush_v4,
+  .test = ncclIbTest,
+  .closeSend = ncclIbCloseSend,
+  .closeRecv = ncclIbCloseRecv,
+  .closeListen = ncclIbCloseListen,
 };

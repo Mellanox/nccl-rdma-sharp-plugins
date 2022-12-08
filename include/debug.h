@@ -15,7 +15,7 @@
 #include <limits.h>
 #include <string.h>
 #include <pthread.h>
-#include "nccl_net.h"
+#include "net.h"
 
 // Conform to pthread and NVTX standard
 #define NCCL_THREAD_NAMELEN 16
