@@ -81,6 +81,8 @@ AS_IF([test "x$sharp_checked" != "xyes"],[
             AC_CHECK_DECLS([SHARP_DTYPE_BFLOAT16], [AC_DEFINE([HAVE_SHARP_DTYPE_BFLOAT16_UINT8_INT8], 1,
                                                     [SHARP v3 datatypes : bfloat16, uint8, int8])], [],
                            [[#include <sharp/api/sharp_coll.h>]])
+            AC_CHECK_DECLS([sharp_coll_reg_mr_v2], [], [], [[#include <sharp/api/sharp_coll.h>]])
+
         ],
         [
             AS_IF([test "x$with_sharp" != "xguess"],
