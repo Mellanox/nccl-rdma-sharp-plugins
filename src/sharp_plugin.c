@@ -362,6 +362,33 @@ ncclResult_t ncclSharpReduceSupport(ncclDataType_t dataType, ncclRedOp_t redOp, 
   return ncclSuccess;
 }
 
+ncclResult_t ncclSharpRegMrDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+#if HAVE_DECL_SHARP_COLL_REG_MR_V2
+  struct ncclSharpCollComm* cComm = (struct ncclSharpCollComm*)collComm;
+  struct sharp_coll_reg_params reg_params;
+
+  struct ncclSharpMemHandle *mh;
+  NCCLCHECK(ncclIbMalloc((void**)&mh, sizeof(struct ncclSharpMemHandle)));
+
+  reg_params.field_mask = SHARP_COLL_REG_FIELD_DMABUF_FD | SHARP_COLL_REG_FIELD_DMABUF_OFFSET;
+  reg_params.dmabuf_fd = fd;
+  reg_params.dmabuf_offset = offset;
+  mh->type = type;
+  if (SHARP_COLL_SUCCESS != sharp_coll_reg_mr_v2(cComm->sharpCollContext, data, size, &reg_params, &(mh->mr))) {
+    WARN("SHARP regmr failed\n");
+    return ncclSystemError;
+  }
+  TRACE(NCCL_INIT,"sharpRegAddr %lx size %ld handle %x", data, size, mh->mr);
+
+  NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMrDmaBuf(cComm->recvComm, data, size, type, offset, fd, &mh->ncclIbMr));
+
+  *mhandle = mh;
+  return ncclSuccess;
+#else
+  return ncclInternalError;
+#endif
+}
+
 ncclResult_t ncclSharpRegMr(void* collComm, void* data, int size, int type, void** mhandle) {
   struct ncclSharpCollComm* cComm = (struct ncclSharpCollComm*)collComm;
 
@@ -378,11 +405,7 @@ ncclResult_t ncclSharpRegMr(void* collComm, void* data, int size, int type, void
   NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->recvComm, data, size, type, &mh->ncclIbMr));
 
   *mhandle = mh;
-  return ncclSuccess;
-}
-
-ncclResult_t ncclSharpRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
-  ncclSharpRegMr(comm, data, size, type, mhandle);
+   return ncclSuccess;
 }
 
 ncclResult_t ncclSharpDeregMr(void* collComm, void* mhandle) {
