@@ -348,7 +348,17 @@ ncclResult_t nccl_p2p_ib_pci_path(nccl_ib_dev_t *devs, int num_devs, char* dev_n
 }
 
 static int ibv_widths[] = { 1, 4, 8, 12, 2};
-static int ibv_speeds[] = { 2500, 5000, 10000, 10000, 14000, 25000, 50000 };
+static int ibv_speeds[] = {
+  2500,  /* SDR */
+  5000,  /* DDR */
+  10000, /* QDR */
+  10000, /* QDR */
+  14000, /* FDR */
+  25000, /* EDR */
+  50000, /* HDR */
+  100000 /* NDR */
+};
+
 
 static int first_bit_set(int val, int max) {
   int i = 0;
