@@ -1,0 +1,48 @@
+name: NCCL Sharp plugin CI
+on:
+  workflow_dispatch: 
+    inputs:
+      mainhost:
+        description: 'Choose one of hosts to run:'
+        required: true
+        type: choice
+        default: 'host01'
+        options:
+          - host01
+          - host02
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+jobs:
+  deployment:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Deployment infrastructure
+      run: /start deploy
+  build:
+    needs: [deployment]
+    runs-on: [self-hosted, linux, x64]
+    steps:
+    - name: Building NCCL RDMA sharp plugin
+      run: /start build
+  sharp_config:
+    needs: [deployment, build]
+    runs-on: [self-hosted, linux, x64]
+    steps:
+    - name: Configuring and checking Sharp
+      run: /start sharp
+  testing:
+    needs: [sharp_config]
+    runs-on: [self-hosted, linux, x64]
+    steps:
+    - name: Running tests
+      run: /start test
+  clean:
+    if: ${{ always() }}
+    needs: [testing]
+    runs-on: [self-hosted, linux, x64]
+    steps:
+    - name: Cleaning
+      run: /start clean

@@ -1,6 +1,9 @@
 #!/bin/bash -leE
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" ; pwd -P)"
+SCRIPT_DIR="$(
+    cd "$(dirname "$0")"
+    pwd -P
+)"
 cd "${SCRIPT_DIR}"
 # shellcheck source=settings.sh
 . "${SCRIPT_DIR}/settings.sh"
