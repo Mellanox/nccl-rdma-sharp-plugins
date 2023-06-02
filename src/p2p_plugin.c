@@ -152,16 +152,13 @@ ncclResult_t nccl_p2p_ib_get_properties(nccl_ib_dev_t *devs, int dev, ncclNetPro
   props->pciPath      = devs[dev].pciPath;
   props->guid         = devs[dev].guid;
   props->ptrSupport   = NCCL_PTR_HOST;
-  if (nccl_p2p_gdr_support(dev) != ncclSuccess) {
-    INFO(NCCL_NET,"NET/IB : GPU Direct RDMA Disabled for HCA %d '%s' (no module)", dev, devs[dev].devName);
-  } else {
-    props->ptrSupport |= NCCL_PTR_CUDA;
-  }
   if (nccl_p2p_gdr_support(dev) == ncclSuccess) {
     props->ptrSupport |= NCCL_PTR_CUDA; // GDR support via nv_peermem
+    INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (nvidia-peermem) enabled for HCA %d '%s", dev, devs[dev].devName);
   }
   if (p2p_plugin == NCCL_P2P_IB && nccl_p2p_dmabuf_support(dev) == ncclSuccess) {
     props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
+    INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (DMABUF) enabled for HCA %d '%s", dev, devs[dev].devName);
   }
 
   props->speed        = devs[dev].speed;
