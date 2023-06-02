@@ -108,6 +108,8 @@ extern struct ncclIbDev userIbDevs[MAX_IB_DEVS];
  * ncclSystemError : no module or module loaded but not supported by GPU */
 ncclResult_t nccl_p2p_gdr_support(int dev);
 
+ncclResult_t nccl_p2p_dmabuf_support(int dev);
+
 ncclResult_t nccl_p2p_ib_pci_path(nccl_ib_dev_t *devs, int num_devs, char* dev_name, char** path, int* real_port);
 
 ncclResult_t nccl_p2p_ib_get_properties(nccl_ib_dev_t *devs, int dev, ncclNetProperties_t* props);
