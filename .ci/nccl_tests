@@ -1,0 +1,10 @@
+#!/bin/bash -eE
+# Wrapper to add correct parameters to the main app
+IB_DEV=$(ibdev2netdev | awk '{ print $1 }'):1
+ETH_DEV=$(ibdev2netdev | awk '{ print $5 }')
+
+export HCOLL_MAIN_IB=${IB_DEV}
+export NCCL_IB_HCA=${IB_DEV}
+export UCX_NET_DEVICES=${IB_DEV}
+export NCCL_SOCKET_IFNAME=${ETH_DEV}
+exec "${@}"
