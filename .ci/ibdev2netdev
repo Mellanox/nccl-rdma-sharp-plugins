@@ -1,0 +1,7 @@
+#!/bin/bash -eE
+# ibdev2netdev doesn't work correctly inside a container. This wrapper is a workaround
+DEV_IB=$(ls -1 /dev/infiniband/umad*)
+N=${DEV_IB: -1}
+if [ -e /dev/infiniband/umad${N} ]; then
+    printf "mlx5_${N} port 1 ====> ib0\n"
+fi

@@ -1,0 +1,5 @@
+#!/bin/bash -eE
+# Wrapper to add correct parameter to the main scripts without refactoring
+TEST_DEV=$(ibdev2netdev | awk '{ print $1 }' ):1
+echo ${UCX_NET_DEVICES}
+./sharp_coll_test -d "${TEST_DEV}" "${@}"
