@@ -5,10 +5,10 @@
 #
 AC_PREREQ([2.63])
 
-AC_COPYRIGHT([Copyright (c) 2019, NVIDIA CORPORATION & AFFILIATES. All rights reserved.])
+AC_COPYRIGHT([Copyright (c) 2019-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.])
 
-define([nccl_rdma_sharp_plugins_ver_major], 1)
-define([nccl_rdma_sharp_plugins_ver_minor], 0)
+define([nccl_rdma_sharp_plugins_ver_major], 2)
+define([nccl_rdma_sharp_plugins_ver_minor], 3)
 
 AC_INIT([nccl-rdma-sharp-plugins], [nccl_rdma_sharp_plugins_ver_major.nccl_rdma_sharp_plugins_ver_minor], [support@mellanox.com], [],[http://github.com/Mellanox/nccl-rdma-sharp-plugins])
 
