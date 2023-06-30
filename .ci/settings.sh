@@ -1,9 +1,14 @@
 #!/bin/bash -leE
+#  Formating for Github acctions fold/unfold
+GH=${GH:-0}
+if [ "${GH}" -eq 1 ]; then
+    GH_FOLD="::group::"
+    GH_UNFOLD="::endgroup::"
+fi
 # PLUGINS
 echo "INFO: DEBUG = $DEBUG"
-DEBUG=true
-if [ "$DEBUG" = "true" ]
-then
+DEBUG=false
+if [ "$DEBUG" = "true" ]; then
     set -x
 fi
 
@@ -24,7 +29,7 @@ module load "${HPCX_UBUNTU_INSTALL_DIR}"/modulefiles/hpcx-ompi
 LD_LIBRARY_PATH="${LD_LIBRARY_PATH//nccl_rdma_sharp_plugin/nccl_rdma_sharp_pluginX}"
 export LD_LIBRARY_PATH
 CUDA_HOME=/usr/local/cuda
-
+#export UCX_NET_DEVICES=$(ibdev2netdev | awk '{print $1}'):1
 export NCCL_RDMA_SHARP_PLUGINS_DIR="${NCCL_RDMA_SHARP_PLUGINS_DIR:-${WORKSPACE}/_install}"
 echo "INFO: NCCL_RDMA_SHARP_PLUGINS_DIR = ${NCCL_RDMA_SHARP_PLUGINS_DIR}"
 
@@ -44,15 +49,13 @@ WORKSPACE="${WORKSPACE:-${TOP_DIR}}"
 CFG_DIR="${WORKSPACE}/.ci/cfg"
 HOSTFILE=${CFG_DIR}/$HOSTNAME/hostfile
 
-if [ ! -f "${HOSTFILE}" ]
-then
+if [ ! -f "${HOSTFILE}" ]; then
     echo "ERROR: ${HOSTFILE} doesn't exist or not accessible"
     echo "FAIL"
     exit 1
 fi
 
-if [ ! -d "${HPCX_DIR}" ]
-then
+if [ ! -d "${HPCX_DIR}" ]; then
     echo "ERROR: ${HPCX_DIR} does not exist or not accessible"
     echo "FAIL"
     exit 1

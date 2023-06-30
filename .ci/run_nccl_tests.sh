@@ -1,45 +1,39 @@
 #!/bin/bash -leE
-
-SCRIPT_DIR="$( cd "$(dirname "$0")" ; pwd -P )"
+SCRIPT_DIR="$(
+    cd "$(dirname "$0")"
+    pwd -P
+)"
 cd "${SCRIPT_DIR}"
 # shellcheck source=settings.sh
 . "${SCRIPT_DIR}"/settings.sh
 
 GLOBAL_TEST_STATUS=0
 
-if [ -z "${NCCL_DIR}" ]
-then
+if [ -z "${NCCL_DIR}" ]; then
     module load dev/nccl-nightly-stable
 else
     export LD_LIBRARY_PATH="${NCCL_DIR}/lib:${LD_LIBRARY_PATH}"
 fi
 
-if [ -z "${NCCL_RDMA_SHARP_PLUGINS_DIR}" ]
-then
+if [ -z "${NCCL_RDMA_SHARP_PLUGINS_DIR}" ]; then
     echo "ERROR: NCCL_RDMA_SHARP_PLUGINS_DIR is not defined"
     echo "FAIL"
     exit 1
 fi
 
-if [ -z "${NCCL_TESTS_DIR}" ]
-then
+if [ -z "${NCCL_TESTS_DIR}" ]; then
     echo "ERROR: NCCL_TESTS_DIR is not defined"
     echo "FAIL"
     exit 1
 fi
 
 NP=2
-IB_DEV="mlx5_0:1"
-
+IB_DEV=$(ibdev2netdev | awk '{ print $1 }'):1
 # UCX_MEMTYPE_CACHE=n - to avoid warnings "memtype_cache.c:83   UCX  ERROR failed to insert region 0x1a1e890 [0x7f8d00000000..0x7f8d30000000]: Element already exists"
 MPIRUN_OPTIONS_COMMON="\
 -x LD_LIBRARY_PATH \
 -x NCCL_DEBUG=INFO \
--x HCOLL_MAIN_IB=${IB_DEV} \
 -x NCCL_DEBUG_SUBSYS=INIT \
--x NCCL_IB_HCA=${IB_DEV} \
--x NCCL_SOCKET_IFNAME=eno1 \
--x UCX_NET_DEVICES=${IB_DEV} \
 -x UCX_MEMTYPE_CACHE=n \
 -x HCOLL_ENABLE_SHARP=0 \
 -x HCOLL_ENABLE_MCAST_ALL=0 \
@@ -51,6 +45,7 @@ MPIRUN_OPTIONS_COMMON="\
 -np $NP \
 --report-bindings \
 --allow-run-as-root \
+-mca oob_tcp_if_exclude eth0 \
 "
 
 # Application options
@@ -85,22 +80,22 @@ trim_multiple_spaces() {
 }
 
 # USAGE: all_reduce_perf
-        # [-t,--nthreads <num threads>]
-        # [-g,--ngpus <gpus per thread>]
-        # [-b,--minbytes <min size in bytes>]
-        # [-e,--maxbytes <max size in bytes>]
-        # [-i,--stepbytes <increment size>]
-        # [-f,--stepfactor <increment factor>]
-        # [-n,--iters <iteration count>]
-        # [-m,--agg_iters <aggregated iteration count>]
-        # [-w,--warmup_iters <warmup iteration count>]
-        # [-p,--parallel_init <0/1>]
-        # [-c,--check <0/1>]
-        # [-o,--op <sum/prod/min/max/all>]
-        # [-d,--datatype <nccltype/all>]
-        # [-r,--root <root>]
-        # [-z,--blocking <0/1>]
-        # [-h,--help]
+# [-t,--nthreads <num threads>]
+# [-g,--ngpus <gpus per thread>]
+# [-b,--minbytes <min size in bytes>]
+# [-e,--maxbytes <max size in bytes>]
+# [-i,--stepbytes <increment size>]
+# [-f,--stepfactor <increment factor>]
+# [-n,--iters <iteration count>]
+# [-m,--agg_iters <aggregated iteration count>]
+# [-w,--warmup_iters <warmup iteration count>]
+# [-p,--parallel_init <0/1>]
+# [-c,--check <0/1>]
+# [-o,--op <sum/prod/min/max/all>]
+# [-d,--datatype <nccltype/all>]
+# [-r,--root <root>]
+# [-z,--blocking <0/1>]
+# [-h,--help]
 
 ###############################################################################
 # Run NCCL-TESTS (MPI)
@@ -108,24 +103,20 @@ trim_multiple_spaces() {
 
 i=1
 
-for TEST_EXE in ${NCCL_TEST_EXE[@]}
-do
+for TEST_EXE in ${NCCL_TEST_EXE[@]}; do
     #===================
     # NCCL_PLUGIN_P2P
     #===================
     # Enable ucx_rma tests once this is resolved: https://redmine.mellanox.com/issues/3037941
     # for P2P_LAYER in ucx ucx_rma ib
-    for P2P_LAYER in ucx ib
-    do
+    for P2P_LAYER in ucx ib; do
         MPIRUN_OPTIONS_PLUGIN_P2P_LAYER="-x NCCL_PLUGIN_P2P=${P2P_LAYER}"
 
         #===================
         # NCCL_PROTO
         #===================
-        for NCCL_PROTO in Simple LL DEFAULT
-        do
-            if [ "${NCCL_PROTO}" = "DEFAULT" ]
-            then
+        for NCCL_PROTO in Simple LL DEFAULT; do
+            if [ "${NCCL_PROTO}" = "DEFAULT" ]; then
                 MPIRUN_OPTIONS_NCCL_PROTO=""
             else
                 MPIRUN_OPTIONS_NCCL_PROTO="-x NCCL_PROTO=${NCCL_PROTO}"
@@ -134,38 +125,31 @@ do
             #===================
             # NCCL_ALGO
             #===================
-            for NCCL_ALGO in CollNet Tree Ring DEFAULT
-            do
-                if [ "${NCCL_ALGO}" = "CollNet" ] && [ "${TEST_EXE}" != "all_reduce_perf" ]
-                then
+            for NCCL_ALGO in CollNet Tree Ring DEFAULT; do
+                if [ "${NCCL_ALGO}" = "CollNet" ] && [ "${TEST_EXE}" != "all_reduce_perf" ]; then
                     # test sharp plugin only with all_reduce_perf
                     continue
                 fi
 
-                if [ "${NCCL_ALGO}" = "DEFAULT" ]
-                then
+                if [ "${NCCL_ALGO}" = "DEFAULT" ]; then
                     MPIRUN_OPTIONS_NCCL_ALGO=""
                 else
                     MPIRUN_OPTIONS_NCCL_ALGO="-x NCCL_ALGO=${NCCL_ALGO}"
                 fi
 
-                if [ "${NCCL_ALGO}" = "CollNet" ]
-                then
+                if [ "${NCCL_ALGO}" = "CollNet" ]; then
                     MPIRUN_OPTIONS_NCCL_ALGO="-x NCCL_COLLNET_ENABLE=1"
                 fi
 
                 #===================
                 # SHARP_ENABLE
                 #===================
-                for SHARP_ENABLE in 0 1
-                do
-                    if { [ "${NCCL_ALGO}" = "Tree" ] || [ "${NCCL_ALGO}" = "Ring" ]; } && [ "$SHARP_ENABLE" = "1" ] 
-                    then
+                for SHARP_ENABLE in 0 1; do
+                    if { [ "${NCCL_ALGO}" = "Tree" ] || [ "${NCCL_ALGO}" = "Ring" ]; } && [ "$SHARP_ENABLE" = "1" ]; then
                         # skip sharp enable 1 for tree and ring algorithms
                         continue
                     fi
-                    if [ "${SHARP_ENABLE}" = "0" ]
-                    then
+                    if [ "${SHARP_ENABLE}" = "0" ]; then
                         MPIRUN_OPTIONS_SHARP=""
                     else
                         MPIRUN_OPTIONS_SHARP="\
@@ -178,10 +162,8 @@ do
                     # NCCL_NET_GDR_LEVEL
                     #===================
                     # for NCCL_NET_GDR_LEVEL in 0 1 2 3 4 5 DEFAULT
-                    for NCCL_NET_GDR_LEVEL in DEFAULT
-                    do
-                        if [ "${NCCL_NET_GDR_LEVEL}" = "DEFAULT" ]
-                        then
+                    for NCCL_NET_GDR_LEVEL in DEFAULT; do
+                        if [ "${NCCL_NET_GDR_LEVEL}" = "DEFAULT" ]; then
                             MPIRUN_OPTIONS_GDR_LEVEL=""
                         else
                             MPIRUN_OPTIONS_GDR_LEVEL="-x NCCL_NET_GDR_LEVEL=${NCCL_NET_GDR_LEVEL}"
@@ -191,17 +173,15 @@ do
                         # NCCL_NET_GDR_READ
                         #===================
                         # for NCCL_NET_GDR_READ in 0 1 DEFAULT
-                        for NCCL_NET_GDR_READ in DEFAULT
-                        do
-                            if [ "${NCCL_NET_GDR_READ}" = "DEFAULT" ]
-                            then
+                        for NCCL_NET_GDR_READ in DEFAULT; do
+                            if [ "${NCCL_NET_GDR_READ}" = "DEFAULT" ]; then
                                 MPIRUN_OPTIONS_GDR_READ=""
                             else
                                 MPIRUN_OPTIONS_GDR_READ="-x NCCL_NET_GDR_READ=${NCCL_NET_GDR_READ}"
                             fi
 
                             echo_hash_line
-                            echo "# Test $i..."
+                            echo "${GH_FOLD}{# Test $i...}"
                             echo_hash_line
 
                             echo "INFO: TEST                = ${TEST_EXE}"
@@ -220,7 +200,7 @@ do
                                 ${MPIRUN_OPTIONS_GDR_LEVEL} \
                                 ${MPIRUN_OPTIONS_GDR_READ} \
                                 ${MPIRUN_OPTIONS_PLUGIN_P2P_LAYER} \
-                                ${NCCL_TESTS_DIR}/build/${TEST_EXE} ${NCCL_TEST_PARAMS}"
+                                ${WORKSPACE}/.ci/nccl_tests ${NCCL_TESTS_DIR}/build/${TEST_EXE} ${NCCL_TEST_PARAMS}"
                             echo "# Test $i reproducer:"
                             echo "export PATH=${PATH}"
                             echo ""
@@ -229,11 +209,12 @@ do
                             echo "export OPAL_PREFIX=${OPAL_PREFIX}"
                             echo ""
                             trim_multiple_spaces "$CMD"
-                            if ! $CMD
-                            then
+                            if ! $CMD; then
+                                echo "${GH_UNFOLD}"
                                 echo "# Test $i... failed"
                                 GLOBAL_TEST_STATUS=1
                             else
+                                echo "${GH_UNFOLD}"
                                 echo "# Test $i... passed"
                             fi
 
@@ -247,8 +228,7 @@ do
 done
 
 ###############################################################################
-if [ ${GLOBAL_TEST_STATUS} -ne 0 ]
-then
+if [ ${GLOBAL_TEST_STATUS} -ne 0 ]; then
     echo "ERROR: some tests failed, check the log file"
     echo "FAIL"
     exit 1
