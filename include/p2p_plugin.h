@@ -27,7 +27,6 @@
 //static_assert(MAX_REQUESTS <= 256, "request id are encoded in wr_id and we need up to 8 requests ids per completion");
 #define IB_DEVICE_SYSFS_FMT "/sys/class/infiniband/%s/device/%s"
 
-
 typedef enum nccl_p2p_plugin {
   NCCL_P2P_IB,
   NCCL_P2P_UCX,
@@ -51,7 +50,8 @@ struct ncclIbRequest {
   struct ncclIbVerbs* verbs;
   int type;
   int events;
-  union ncclSocketAddress *addr;
+  struct ncclSocket* sock;
+  struct ncclIbGidInfo* gidInfo;
   int nreqs;
   union {
     struct {
@@ -91,6 +91,7 @@ typedef struct ncclIbDev {
   int      realPort;
   int      maxQp;
   struct   ncclIbMrCache mrCache;
+  int ar; // ADAPTIVE_ROUTING
 } __attribute__((aligned(64))) nccl_ib_dev_t;
 
 #define MAX_IB_PORT 15
@@ -99,7 +100,7 @@ struct userIbDev {
   uint16_t port_en;
 };
 
-#define MAX_IB_DEVS 16
+#define MAX_IB_DEVS 32
 extern struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
 extern struct ncclIbDev userIbDevs[MAX_IB_DEVS];
 /* Detect whether GDR can work on a given NIC with the current CUDA device

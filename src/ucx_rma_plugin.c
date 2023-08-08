@@ -50,6 +50,19 @@ typedef struct nccl_ucx_rma_rkey_buf {
     int    send;
 } nccl_ucx_rma_rkey_buf_t;
 
+enum ncclUCXCommState {
+  ncclUCXCommStateStart = 0,
+  ncclUCXCommStateConnect = 1,
+  ncclUCXCommStateAccept = 3,
+};
+
+struct ncclUCXCommStage {
+  enum ncclUCXCommState state;
+  uint8_t iteration;
+  void* sock;
+  void* comm;
+};
+
 typedef struct ucx_rma_mhandle {
   ucp_mem_h               ucp_memh;
   ucp_rkey_h              rkey;
@@ -71,11 +84,16 @@ pthread_mutex_t nccl_ucx_rma_lock = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct ucx_rma_listen_handle {
   union ncclSocketAddress connectAddr; /* reciever socket address */
+  uint64_t magic;                      /* random number to help debugging */
+  ucp_tag_t               tag;         /* tag that is used to distiguish data that was sent to
+                                          this reciever. Required when shared worker is used. */
+  struct ncclUCXCommStage stage;
 } ucx_rma_listen_handle_t;
 
 typedef struct nccl_ucx_rma_listen_comm {
   int dev;
   struct ncclSocket sock;/* socket for OOB connection */
+  struct ncclUCXCommStage stage;
 } nccl_ucx_rma_listen_comm_t;
 
 struct ep_list {
@@ -372,10 +390,11 @@ ncclResult_t nccl_ucx_rma_listen(int dev, void *handle, void **listen_comm)
   NCCL_STATIC_ASSERT(sizeof(ucx_rma_listen_handle_t) < NCCL_NET_HANDLE_MAXSIZE,
                      "UCX-RMA listen handle size too large");
 
+  my_handle->magic = NCCL_SOCKET_MAGIC;
   NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(nccl_ucx_rma_listen_comm_t)));
-  NCCLCHECK(GetSocketAddr(&comm->sock.addr));
+  NCCLCHECK(ncclSocketInit(&comm->sock, &nccl_ucx_if_addr, my_handle->magic, ncclSocketTypeNetIb, NULL, 1));
   NCCLCHECK(ncclSocketListen(&comm->sock));
-  memcpy(&my_handle->connectAddr, &comm->sock.addr, sizeof(union ncclSocketAddress));
+  NCCLCHECK(ncclSocketGetAddr(&comm->sock, &my_handle->connectAddr));
 
   comm->dev = dev; 
   *listen_comm = comm;
@@ -402,16 +421,30 @@ static ucs_status_t nccl_ucx_rma_am_rkey_cb(void *arg, void *data, size_t length
 ncclResult_t nccl_ucx_rma_connect(int dev, void *handle, void **send_comm)
 {
   ucx_rma_listen_handle_t  *recv_handle = (ucx_rma_listen_handle_t*)handle;
+  struct ncclUCXCommStage* stage = &recv_handle->stage;
   nccl_ucx_rma_send_comm_t *comm;
   ucp_mem_map_params_t     mmap_params;
   size_t                   rkey_buf_size;
   void                     *rkey_buf;
   uint64_t                 fifo_adr;
   int                      i;
+  int                      ready;
+
+  *send_comm = NULL;
+
+  if (stage->state == ncclUCXCommStateConnect) goto ucx_connect_check;
 
   NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(*comm)));
-  NCCLCHECK(ncclSocketInit(&comm->super.sock, &recv_handle->connectAddr, NULL, 1));
+  NCCLCHECK(ncclSocketInit(&comm->super.sock, &recv_handle->connectAddr, recv_handle->magic, ncclSocketTypeNetIb, NULL, 1));
+  stage->comm = comm;
+  stage->state = ncclUCXCommStateConnect;
   NCCLCHECK(ncclSocketConnect(&comm->super.sock));
+
+ucx_connect_check:
+  /* since ncclSocketConnect is async, we must check if connection is complete */
+  NCCLCHECK(ncclSocketReady(&comm->super.sock, &ready));
+  if (!ready) return ncclSuccess;
+
   NCCLCHECK(nccl_ucx_rma_init_comm_context(dev, &comm->super));
   NCCLCHECK(nccl_ucx_rma_send_worker_address(comm->super.worker, &comm->super.sock));
   NCCLCHECK(nccl_ucx_add_ep(comm->super.worker, &comm->super.sock));
@@ -493,37 +526,53 @@ ncclResult_t nccl_ucx_rma_accept(void *listen_comm, void **recv_comm)
 {
   nccl_ucx_rma_listen_comm_t *l_comm = (nccl_ucx_rma_listen_comm_t *)listen_comm;
   socklen_t                  socklen = sizeof(struct sockaddr_in);
-  nccl_ucx_rma_recv_comm_t   *comm;
+  struct ncclUCXCommStage* stage = &l_comm->stage;
+  nccl_ucx_rma_recv_comm_t   *r_comm;
   struct sockaddr_in         sockaddr;
   void                       *rkey_buf;
   size_t                     rkey_buf_size;
+  int                        ready;
  
-  NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(nccl_ucx_rma_recv_comm_t)));
-  NCCLCHECK(ncclSocketAccept(&comm->super.sock, &l_comm->sock));
-  NCCLCHECK(nccl_ucx_rma_init_comm_context(l_comm->dev, &comm->super));
-  UCXCHECK(ucp_worker_set_am_handler(comm->super.worker, comm->super.id,
-                                     nccl_ucx_rma_am_cb, comm->super.reqs,
+  *recv_comm = NULL;
+  if (stage->state == ncclUCXCommStateAccept) goto ucx_accept_check;
+
+  NCCLCHECK(ncclIbMalloc((void**)&r_comm, sizeof(nccl_ucx_rma_recv_comm_t)));
+  stage->comm = r_comm;
+  stage->state = ncclUCXCommStateAccept;
+  l_comm->sock.asyncFlag = 1;
+  r_comm->super.sock.asyncFlag = 1;
+
+  NCCLCHECK(ncclSocketInit(&r_comm->super.sock, NULL, NCCL_SOCKET_MAGIC, ncclSocketTypeUnknown, NULL, 0));
+  NCCLCHECK(ncclSocketAccept(&r_comm->super.sock, &l_comm->sock));
+
+ucx_accept_check:
+  NCCLCHECK(ncclSocketReady(&r_comm->super.sock, &ready));
+  if (!ready) return ncclSuccess;
+
+  NCCLCHECK(nccl_ucx_rma_init_comm_context(l_comm->dev, &r_comm->super));
+  UCXCHECK(ucp_worker_set_am_handler(r_comm->super.worker, r_comm->super.id,
+                                     nccl_ucx_rma_am_cb, r_comm->super.reqs,
                                      UCP_AM_FLAG_WHOLE_MSG));
 
-  NCCLCHECK(nccl_ucx_rma_init_ep(&comm->super.sock, comm->super.worker, &comm->ep, 1));
-  NCCLCHECK(nccl_ucx_add_ep(comm->super.worker, &comm->super.sock));
-  NCCLCHECK(ncclSocketRecv(&comm->super.sock, &rkey_buf_size, sizeof(size_t)));
+  NCCLCHECK(nccl_ucx_rma_init_ep(&r_comm->super.sock, r_comm->super.worker, &r_comm->ep, 1));
+  NCCLCHECK(nccl_ucx_add_ep(r_comm->super.worker, &r_comm->super.sock));
+  NCCLCHECK(ncclSocketRecv(&r_comm->super.sock, &rkey_buf_size, sizeof(size_t)));
 
   rkey_buf = malloc(rkey_buf_size);
   if (rkey_buf == NULL) {
     return ncclSystemError;
   }
-  NCCLCHECK(ncclSocketRecv(&comm->super.sock, rkey_buf, rkey_buf_size));
-  NCCLCHECK(ncclSocketRecv(&comm->super.sock, &comm->rem_fifo.addr, sizeof(uint64_t)));
-  NCCLCHECK(ncclSocketRecv(&comm->super.sock, &comm->rem_am_id, sizeof(int)));
-  UCXCHECK(ucp_ep_rkey_unpack(comm->ep, rkey_buf, &comm->rem_fifo.rkey));
+  NCCLCHECK(ncclSocketRecv(&r_comm->super.sock, rkey_buf, rkey_buf_size));
+  NCCLCHECK(ncclSocketRecv(&r_comm->super.sock, &r_comm->rem_fifo.addr, sizeof(uint64_t)));
+  NCCLCHECK(ncclSocketRecv(&r_comm->super.sock, &r_comm->rem_am_id, sizeof(int)));
+  UCXCHECK(ucp_ep_rkey_unpack(r_comm->ep, rkey_buf, &r_comm->rem_fifo.rkey));
   free(rkey_buf);
 
   if (nccl_p2p_gdr_support(l_comm->dev) == ncclSuccess) {
-    comm->super.gpuFlush.enabled = 1;
+    r_comm->super.gpuFlush.enabled = 1;
   }
 
-  if (comm->super.gpuFlush.enabled) {
+  if (r_comm->super.gpuFlush.enabled) {
     ucp_worker_attr_t attr;
     ucp_ep_params_t   ep_params;
 
@@ -531,16 +580,16 @@ ncclResult_t nccl_ucx_rma_accept(void *listen_comm, void **recv_comm)
                          UCP_WORKER_ATTR_FIELD_ADDRESS_FLAGS;
     attr.address_flags = UCP_WORKER_ADDRESS_FLAG_NET_ONLY;
 
-    UCXCHECK(ucp_worker_query(comm->super.worker, &attr));
+    UCXCHECK(ucp_worker_query(r_comm->super.worker, &attr));
     ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
     ep_params.address    = attr.address;
-    UCXCHECK(ucp_ep_create(comm->super.worker, &ep_params,
-                           &comm->super.gpuFlush.flush_ep));
+    UCXCHECK(ucp_ep_create(r_comm->super.worker, &ep_params,
+                           &r_comm->super.gpuFlush.flush_ep));
 
     free(attr.address);
   }
-  comm->super.num_mh = 0;
-  *recv_comm = comm;
+  r_comm->super.num_mh = 0;
+  *recv_comm = r_comm;
 
   return ncclSuccess;
 }
