@@ -265,12 +265,11 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
   }
   int next = (cComm->rank + 1) % nranks;
   do {
-    NCCLCHECK(NCCL_PLUGIN_SYMBOL.connect(lComm->dev, handles[next], &cComm->sendComm));
-  } while(cComm->sendComm == NULL);
-
-  do {
-    NCCLCHECK(NCCL_PLUGIN_SYMBOL.accept(lComm->listenCommP2P, &cComm->recvComm)); // From prev
-  } while(cComm->recvComm == NULL);
+    if (cComm->sendComm == NULL)
+      NCCLCHECK(NCCL_PLUGIN_SYMBOL.connect(lComm->dev, handles[next], &cComm->sendComm));
+    if (cComm->recvComm == NULL)
+      NCCLCHECK(NCCL_PLUGIN_SYMBOL.accept(lComm->listenCommP2P, &cComm->recvComm)); // From prev
+  } while(cComm->sendComm == NULL || cComm->recvComm == NULL);
 
   struct ncclSharpInfo* allInfo;
   pid_t pid = getpid();

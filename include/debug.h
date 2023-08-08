@@ -20,6 +20,7 @@
 // Conform to pthread and NVTX standard
 #define NCCL_THREAD_NAMELEN 16
 
+extern pthread_mutex_t ncclDebugLock;
 
 extern ncclDebugLogger_t pluginLogFunction;
 
