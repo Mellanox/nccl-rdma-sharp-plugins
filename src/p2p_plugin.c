@@ -38,6 +38,7 @@ int ncclNSharpDevs;
 #endif
 extern int ncclIbRelaxedOrderingEnabled;
 NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
+NCCL_PARAM(IbAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
 
 ncclResult_t pluginInit(ncclDebugLogger_t logFunction);
 
@@ -268,6 +269,12 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
           ncclIbDevs[ncclNIbDevs].mrCache.capacity = 0;
           ncclIbDevs[ncclNIbDevs].mrCache.population = 0;
           ncclIbDevs[ncclNIbDevs].mrCache.slots = NULL;
+
+         // Enable ADAPTIVE_ROUTING by default on IB networks
+          // But allow it to be overloaded by an env parameter
+          ncclIbDevs[ncclNIbDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
+          if (ncclParamIbAdaptiveRouting() != -2) ncclIbDevs[ncclNIbDevs].ar = ncclParamIbAdaptiveRouting();
+
           ncclIbDevs[ncclNIbDevs].isSharpDev = 0;
           if (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND)
           {
