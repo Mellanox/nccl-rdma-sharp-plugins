@@ -332,33 +332,33 @@ static ncclResult_t ucx_get_ctx_and_worker(int dev, ucp_context_h *ctx,
 }
 
 static ncclResult_t nccl_ucx_free_worker(ucp_worker_h worker) {
-  int i;
-  int dummy;
+  int i, dummy, count;
   struct ep_list *ep, *cur;
 
   pthread_mutex_lock(&nccl_ucx_lock);
   for(i = 0; i < ncclNIbDevs; i++) {
-    if (worker == workers[i].worker) {
-      workers[i].count--;
-      if (workers[i].count == 0){
-        ep = workers[i].eps;
-        while(ep){
-          cur = ep;
-          NCCLCHECK(ncclSocketRecv(ep->sock, &dummy, sizeof(int)));
-          ep = ep->next;
-          close(cur->sock->fd);
-          free(cur);
-        }
-        ucp_worker_destroy(workers[i].worker);
-        ucp_cleanup(workers[i].ctx);
-        workers[i].eps    = NULL;
-        workers[i].worker = NULL;
-        workers[i].ctx    = NULL;
-      }
+    if (workers[i].count > 0 && worker == workers[i].worker) {
+      count = --workers[i].count;
       break;
     }
   }
   pthread_mutex_unlock(&nccl_ucx_lock);
+
+  if (i < ncclNIbDevs && count == 0) {
+    ep = workers[i].eps;
+    while(ep){
+      cur = ep;
+      NCCLCHECK(ncclSocketRecv(ep->sock, &dummy, sizeof(int)));
+      ep = ep->next;
+      close(cur->sock->fd);
+      free(cur);
+    }
+    ucp_worker_destroy(workers[i].worker);
+    ucp_cleanup(workers[i].ctx);
+    workers[i].eps    = NULL;
+    workers[i].worker = NULL;
+    workers[i].ctx    = NULL;
+  }
 
   return ncclSuccess;
 }
