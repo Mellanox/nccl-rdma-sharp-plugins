@@ -15,17 +15,17 @@
 #include "p2p_plugin.h"
 
 #ifdef HAVE_UCX_PLUGIN
+extern ncclNet_v7_t ucxPlugin_v7;
 extern ncclNet_v6_t ucxPlugin_v6;
 extern ncclNet_v5_t ucxPlugin_v5;
-extern ncclNet_v4_t ucxPlugin_v4;
+extern ncclNet_v7_t ucxRmaPlugin_v7;
 extern ncclNet_v6_t ucxRmaPlugin_v6;
 extern ncclNet_v5_t ucxRmaPlugin_v5;
-extern ncclNet_v4_t ucxRmaPlugin_v4;
 #endif
 
+extern ncclNet_v7_t ibPlugin_v7;
 extern ncclNet_v6_t ibPlugin_v6;
 extern ncclNet_v5_t ibPlugin_v5;
-extern ncclNet_v4_t ibPlugin_v4;
 pthread_mutex_t nccl_p2p_lock = PTHREAD_MUTEX_INITIALIZER;
 
 ncclDebugLogger_t pluginLogFunction;
@@ -40,30 +40,31 @@ extern int ncclIbRelaxedOrderingEnabled;
 NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
 NCCL_PARAM(IbAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
 
-ncclResult_t pluginInit(ncclDebugLogger_t logFunction);
+ncclResult_t pluginInit_v7(ncclDebugLogger_t logFunction);
+ncclResult_t pluginInit_v6(ncclDebugLogger_t logFunction);
+ncclResult_t pluginInit_v5(ncclDebugLogger_t logFunction);
+
+ncclNet_v7_t ncclNetPlugin_v7 = {
+  "NCCL RDMA Plugin v7",
+  pluginInit_v7,
+};
 
 ncclNet_v6_t ncclNetPlugin_v6 = {
   "NCCL RDMA Plugin v6",
-  pluginInit,
+  pluginInit_v6,
 };
 
 
 ncclNet_v5_t ncclNetPlugin_v5 = {
   "NCCL RDMA Plugin v5",
-  pluginInit,
+  pluginInit_v5,
 };
 
-
-ncclNet_v4_t ncclNetPlugin_v4 = {
-  "NCCL RDMA Plugin v4",
-  pluginInit,
-};
 
 static nccl_p2p_plugin_t p2p_plugin = NCCL_P2P_LAST;
 
-ncclResult_t pluginInit(ncclDebugLogger_t logFunction)
+static void pluginSetup()
 {
-  pluginLogFunction = logFunction;
 
   p2p_plugin = NCCL_P2P_IB;
   const char *plugin_path = get_plugin_lib_path();
@@ -84,26 +85,45 @@ ncclResult_t pluginInit(ncclDebugLogger_t logFunction)
   }
   switch (p2p_plugin) {
     case NCCL_P2P_IB:
+      ncclNetPlugin_v7 = ibPlugin_v7;
       ncclNetPlugin_v6 = ibPlugin_v6;
       ncclNetPlugin_v5 = ibPlugin_v5;
-      ncclNetPlugin_v4 = ibPlugin_v4;
       break;
 #ifdef HAVE_UCX_PLUGIN
     case NCCL_P2P_UCX:
+      ncclNetPlugin_v7 = ucxPlugin_v7;
       ncclNetPlugin_v6 = ucxPlugin_v6;
       ncclNetPlugin_v5 = ucxPlugin_v5;
-      ncclNetPlugin_v4 = ucxPlugin_v4;
       break;
     case NCCL_P2P_UCX_RMA:
+      ncclNetPlugin_v7 = ucxRmaPlugin_v7;
       ncclNetPlugin_v6 = ucxRmaPlugin_v6;
       ncclNetPlugin_v5 = ucxRmaPlugin_v5;
-      ncclNetPlugin_v4 = ucxRmaPlugin_v4;
       break;
 #endif
   }
 
-  INFO(NCCL_INIT|NCCL_NET, "P2P plugin %s", NCCL_PLUGIN_SYMBOL.name);
-  return NCCL_PLUGIN_SYMBOL.init(logFunction);
+}
+
+ncclResult_t pluginInit_v7(ncclDebugLogger_t logFunction) {
+  pluginLogFunction = logFunction;
+  pluginSetup();
+  INFO(NCCL_INIT|NCCL_NET, "P2P plugin %s", ncclNetPlugin_v7.name);
+  return ncclNetPlugin_v7.init(logFunction);
+}
+
+ncclResult_t pluginInit_v6(ncclDebugLogger_t logFunction) {
+  pluginLogFunction = logFunction;
+  pluginSetup();
+  INFO(NCCL_INIT|NCCL_NET, "P2P plugin %s", ncclNetPlugin_v6.name);
+  return ncclNetPlugin_v6.init(logFunction);
+}
+
+ncclResult_t pluginInit_v5(ncclDebugLogger_t logFunction) {
+  pluginLogFunction = logFunction;
+  pluginSetup();
+  INFO(NCCL_INIT|NCCL_NET, "P2P plugin %s", ncclNetPlugin_v5.name);
+  return ncclNetPlugin_v5.init(logFunction);
 }
 
 ncclResult_t nccl_p2p_gdr_support(int dev)
@@ -167,6 +187,8 @@ ncclResult_t nccl_p2p_ib_get_properties(nccl_ib_dev_t *devs, int dev, ncclNetPro
   props->port         = devs[dev].port + devs[dev].realPort;
   props->maxComms     = devs[dev].maxQp;
   props->maxRecvs     = (p2p_plugin == NCCL_P2P_IB) ? NCCL_NET_IB_MAX_RECVS : 1;
+  props->netDeviceType    = NCCL_NET_DEVICE_HOST;
+  props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
 
   return ncclSuccess;
 }

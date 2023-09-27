@@ -20,9 +20,9 @@
 #include "sharp/api/sharp_coll.h"
 #include "utils.h"
 
+extern ncclNet_v7_t ncclNetPlugin_v7;
 extern ncclNet_v6_t ncclNetPlugin_v6;
 extern ncclNet_v5_t ncclNetPlugin_v5;
-extern ncclNet_v4_t ncclNetPlugin_v4;
 
 int ncclNSharpDevs = -1;
 struct sharp_coll_caps sharp_caps;
@@ -123,8 +123,8 @@ int ncclSharpAllGather(void *context, void *buf, int len) {
 
   p2p_plugin = nccl_p2p_get_plugin_type();
   if (p2p_plugin != NCCL_P2P_UCX) {
-    NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->recvComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &rMhandle));
-    NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->sendComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &sMhandle));
+    NCCLCHECK(ncclNetPlugin_v7.regMr(cComm->recvComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &rMhandle));
+    NCCLCHECK(ncclNetPlugin_v7.regMr(cComm->sendComm, buf, cComm->nranks*len, NCCL_PTR_HOST, &sMhandle));
   }
 
   int speer = cComm->rank;
@@ -134,21 +134,21 @@ int ncclSharpAllGather(void *context, void *buf, int len) {
     while (srequest == NULL || rrequest == NULL) {
        void *rbuf = ((char*)buf)+rpeer*len;
        int tag = 0x69;
-       if (srequest == NULL) NCCLCHECK(NCCL_PLUGIN_SYMBOL.isend(cComm->sendComm, ((char*)buf)+speer*len, len, tag, sMhandle, &srequest));
-       if (rrequest == NULL) NCCLCHECK(NCCL_PLUGIN_SYMBOL.irecv(cComm->recvComm, 1, &rbuf, &len, &tag, &rMhandle, &rrequest));
+       if (srequest == NULL) NCCLCHECK(ncclNetPlugin_v7.isend(cComm->sendComm, ((char*)buf)+speer*len, len, tag, sMhandle, &srequest));
+       if (rrequest == NULL) NCCLCHECK(ncclNetPlugin_v7.irecv(cComm->recvComm, 1, &rbuf, &len, &tag, &rMhandle, &rrequest));
     }
     while (srequest || rrequest) {
       int done;
-      if (rrequest) NCCLCHECK(NCCL_PLUGIN_SYMBOL.test(rrequest, &done, NULL));
+      if (rrequest) NCCLCHECK(ncclNetPlugin_v7.test(rrequest, &done, NULL));
       if (done) rrequest = NULL;
-      if (srequest) NCCLCHECK(NCCL_PLUGIN_SYMBOL.test(srequest, &done, NULL));
+      if (srequest) NCCLCHECK(ncclNetPlugin_v7.test(srequest, &done, NULL));
       if (done) srequest = NULL;
     }
     speer = rpeer;
   }
   if (p2p_plugin != NCCL_P2P_UCX) {
-    NCCLCHECK(NCCL_PLUGIN_SYMBOL.deregMr(cComm->recvComm, rMhandle));
-    NCCLCHECK(NCCL_PLUGIN_SYMBOL.deregMr(cComm->sendComm, sMhandle));
+    NCCLCHECK(ncclNetPlugin_v7.deregMr(cComm->recvComm, rMhandle));
+    NCCLCHECK(ncclNetPlugin_v7.deregMr(cComm->sendComm, sMhandle));
   }
 
   return 0;
@@ -203,7 +203,7 @@ ncclResult_t ncclSharpInit(ncclDebugLogger_t logFunction) {
   setenv("SHARP_COLL_LOCK_ON_COMM_INIT", "1", 0);
   setenv("SHARP_COLL_LOG_LEVEL", "3", 0);
 
-  return NCCL_PLUGIN_SYMBOL.init(logFunction);
+  return ncclNetPlugin_v7.init(logFunction);
 }
 
 ncclResult_t ncclSharpDevices(int* ndev) {
@@ -211,25 +211,26 @@ ncclResult_t ncclSharpDevices(int* ndev) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclSharpGetProperties_v6(int dev, ncclNetProperties_v6_t* props) {
-  return NCCL_PLUGIN_SYMBOL.getProperties(dev, props);
+ncclResult_t ncclSharpGetProperties_v7(int dev, ncclNetProperties_v7_t* props) {
+  return ncclNetPlugin_v7.getProperties(dev, props);
 }
+
+
+ncclResult_t ncclSharpGetProperties_v6(int dev, ncclNetProperties_v6_t* props) {
+  return  ncclNetPlugin_v6.getProperties(dev, props);
+}
+
 
 ncclResult_t ncclSharpGetProperties_v5(int dev, ncclNetProperties_v5_t* props) {
   return ncclNetPlugin_v5.getProperties(dev, props);
 }
-
-ncclResult_t ncclSharpGetProperties_v4(int dev, ncclNetProperties_v4_t* props) {
-  return ncclNetPlugin_v4.getProperties(dev, props);
-}
-
 
 ncclResult_t ncclSharpListen(int dev, void* opaqueHandle, void** listenComm) {
   struct ncclSharpListenComm *lComm;
   ncclResult_t status;
 
   NCCLCHECK(ncclIbMalloc((void**)&lComm, sizeof(struct ncclSharpListenComm)));
-  status = NCCL_PLUGIN_SYMBOL.listen(dev, opaqueHandle, &lComm->listenCommP2P);
+  status = ncclNetPlugin_v7.listen(dev, opaqueHandle, &lComm->listenCommP2P);
   lComm->dev = dev;
   *listenComm = lComm;
   return status;
@@ -266,9 +267,9 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
   int next = (cComm->rank + 1) % nranks;
   do {
     if (cComm->sendComm == NULL)
-      NCCLCHECK(NCCL_PLUGIN_SYMBOL.connect(lComm->dev, handles[next], &cComm->sendComm));
+      NCCLCHECK(ncclNetPlugin_v6.connect(lComm->dev, handles[next], &cComm->sendComm));
     if (cComm->recvComm == NULL)
-      NCCLCHECK(NCCL_PLUGIN_SYMBOL.accept(lComm->listenCommP2P, &cComm->recvComm)); // From prev
+      NCCLCHECK(ncclNetPlugin_v6.accept(lComm->listenCommP2P, &cComm->recvComm)); // From prev
   } while(cComm->sendComm == NULL || cComm->recvComm == NULL);
 
   struct ncclSharpInfo* allInfo;
@@ -379,7 +380,7 @@ ncclResult_t ncclSharpRegMrDmaBuf(void* collComm, void* data, size_t size, int t
   }
   TRACE(NCCL_INIT,"sharpRegAddr %lx size %ld handle %x", data, size, mh->mr);
 
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMrDmaBuf(cComm->recvComm, data, size, type, offset, fd, &mh->ncclIbMr));
+  NCCLCHECK(ncclNetPlugin_v7.regMrDmaBuf(cComm->recvComm, data, size, type, offset, fd, &mh->ncclIbMr));
 
   *mhandle = mh;
   return ncclSuccess;
@@ -401,7 +402,7 @@ ncclResult_t ncclSharpRegMr(void* collComm, void* data, int size, int type, void
   }
   TRACE(NCCL_INIT,"sharpRegAddr %lx size %ld handle %x", data, size, mh->mr);
 
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.regMr(cComm->recvComm, data, size, type, &mh->ncclIbMr));
+  NCCLCHECK(ncclNetPlugin_v7.regMr(cComm->recvComm, data, size, type, &mh->ncclIbMr));
 
   *mhandle = mh;
    return ncclSuccess;
@@ -415,7 +416,7 @@ ncclResult_t ncclSharpDeregMr(void* collComm, void* mhandle) {
     WARN("SHARP deregmr failed\n");
   }
 
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.deregMr(cComm->recvComm, mh->ncclIbMr));
+  NCCLCHECK(ncclNetPlugin_v7.deregMr(cComm->recvComm, mh->ncclIbMr));
 
   free(mh);
   return ncclSuccess;
@@ -503,7 +504,7 @@ ncclResult_t ncclSharpIflush(void* collComm, void* data, int size, void* mhandle
 
   NCCLCHECK(ncclSharpGetRequest(cComm->reqs, &req));
   req->requestType = NCCL_SHARP_REQ_IFLUSH;
-  NCCL_PLUGIN_SYMBOL.iflush(cComm->recvComm, 1, &data, &size, &mh->ncclIbMr, &req->sharpRequest);
+  ncclNetPlugin_v7.iflush(cComm->recvComm, 1, &data, &size, &mh->ncclIbMr, &req->sharpRequest);
   if (!req->sharpRequest) {
     *request = NULL;
      req->used = 0;
@@ -518,7 +519,7 @@ ncclResult_t ncclSharpTest(void* request, int* done, int* size) {
   struct ncclSharpRequest* req = (struct ncclSharpRequest*)request;
 
   if (req->requestType == NCCL_SHARP_REQ_IFLUSH) {
-    NCCL_PLUGIN_SYMBOL.test(req->sharpRequest, done, size);
+    ncclNetPlugin_v7.test(req->sharpRequest, done, size);
     if (*done == 1) {
       req->used = 0;
     }
@@ -552,8 +553,8 @@ ncclResult_t ncclSharpCloseColl(void* collComm) {
   sharp_coll_comm_destroy(cComm->sharpCollComm);
   sharp_coll_finalize(cComm->sharpCollContext);
 
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.closeRecv(cComm->recvComm));
-  NCCLCHECK(NCCL_PLUGIN_SYMBOL.closeSend(cComm->sendComm));
+  NCCLCHECK(ncclNetPlugin_v7.closeRecv(cComm->recvComm));
+  NCCLCHECK(ncclNetPlugin_v7.closeSend(cComm->sendComm));
   free(cComm);
   return ncclSuccess;
 }
@@ -562,10 +563,28 @@ ncclResult_t ncclSharpCloseListen(void* listenComm) {
   struct ncclSharpListenComm *lComm = (struct ncclSharpListenComm*)listenComm;
   ncclResult_t status;
 
-  status = NCCL_PLUGIN_SYMBOL.closeListen(lComm->listenCommP2P);
+  status = ncclNetPlugin_v7.closeListen(lComm->listenCommP2P);
   free(listenComm);
   return status;
 }
+
+ncclCollNet_v7_t ncclCollNetPlugin_v7 = {
+  "SHARP",
+  ncclSharpInit,
+  ncclSharpDevices,
+  ncclSharpGetProperties_v7,
+  ncclSharpListen,
+  ncclSharpConnect,
+  ncclSharpReduceSupport,
+  ncclSharpRegMr,
+  ncclSharpRegMrDmaBuf,
+  ncclSharpDeregMr,
+  ncclSharpIallreduce,
+  ncclSharpIflush,
+  ncclSharpTest,
+  ncclSharpCloseColl,
+  ncclSharpCloseListen
+};
 
 ncclCollNet_v6_t ncclCollNetPlugin_v6 = {
   "SHARP",
@@ -590,23 +609,6 @@ ncclCollNet_v5_t ncclCollNetPlugin_v5 = {
   ncclSharpInit,
   ncclSharpDevices,
   ncclSharpGetProperties_v5,
-  ncclSharpListen,
-  ncclSharpConnect,
-  ncclSharpReduceSupport,
-  ncclSharpRegMr,
-  ncclSharpDeregMr,
-  ncclSharpIallreduce,
-  ncclSharpIflush,
-  ncclSharpTest,
-  ncclSharpCloseColl,
-  ncclSharpCloseListen
-};
-
-ncclCollNet_v4_t ncclCollNetPlugin_v4 = {
-  "SHARP",
-  ncclSharpInit,
-  ncclSharpDevices,
-  ncclSharpGetProperties_v4,
   ncclSharpListen,
   ncclSharpConnect,
   ncclSharpReduceSupport,
