@@ -20,6 +20,7 @@
 #include "sharp/api/sharp_coll.h"
 #include "utils.h"
 
+extern ncclNet_v8_t ncclNetPlugin_v8;
 extern ncclNet_v7_t ncclNetPlugin_v7;
 extern ncclNet_v6_t ncclNetPlugin_v6;
 extern ncclNet_v5_t ncclNetPlugin_v5;
@@ -211,15 +212,17 @@ ncclResult_t ncclSharpDevices(int* ndev) {
   return ncclSuccess;
 }
 
+ncclResult_t ncclSharpGetProperties_v8(int dev, ncclNetProperties_v8_t* props) {
+  return ncclNetPlugin_v8.getProperties(dev, props);
+}
+
 ncclResult_t ncclSharpGetProperties_v7(int dev, ncclNetProperties_v7_t* props) {
   return ncclNetPlugin_v7.getProperties(dev, props);
 }
 
-
 ncclResult_t ncclSharpGetProperties_v6(int dev, ncclNetProperties_v6_t* props) {
   return  ncclNetPlugin_v6.getProperties(dev, props);
 }
-
 
 ncclResult_t ncclSharpGetProperties_v5(int dev, ncclNetProperties_v5_t* props) {
   return ncclNetPlugin_v5.getProperties(dev, props);
@@ -497,6 +500,117 @@ ncclResult_t ncclSharpIallreduce(void* collComm, void* sendData, void* recvData,
   return ncclSuccess;
 }
 
+ncclResult_t ncclSharpIallgather(void* collComm, void* sendData, int nRecvParts, ncclNetSGE_v8_t* recvParts,
+                             size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
+                             void* sendMhandle, void** request)
+{
+  struct ncclSharpCollComm* cComm = (struct ncclSharpCollComm*)collComm;
+  struct ncclSharpMemHandle *send_mh = (struct ncclSharpMemHandle*)sendMhandle;
+  struct ncclSharpMemHandle *recv_mh = (struct ncclSharpMemHandle*)recvParts[0].mhandle;
+  struct ncclSharpRequest* req;
+  NCCLCHECK(ncclSharpGetRequest(cComm->reqs, &req));
+
+
+  assert(nRecvParts == 1);
+
+  struct sharp_coll_gather_spec gather_spec;
+
+  gather_spec.sbuf_desc.type = SHARP_DATA_BUFFER;
+  gather_spec.sbuf_desc.buffer.ptr = sendData;
+  gather_spec.sbuf_desc.buffer.length = bytesPerRank;
+  gather_spec.sbuf_desc.buffer.mem_handle = send_mh->mr;
+
+  gather_spec.rbuf_desc.type = SHARP_DATA_BUFFER;
+  gather_spec.rbuf_desc.buffer.ptr = recvParts[0].address;
+  gather_spec.rbuf_desc.buffer.length = recvParts[0].size;
+  gather_spec.rbuf_desc.buffer.mem_handle = recv_mh->mr;
+
+  gather_spec.dtype = SHARP_DTYPE_INT8;
+  gather_spec.size = recvParts[0].size;
+  gather_spec.offset = windowOffset;
+
+#if BLOCKING==0
+  if (SHARP_COLL_SUCCESS != sharp_coll_do_allgather_nb(cComm->sharpCollComm, &gather_spec, &req->sharpRequest)) {
+    WARN("SHARP Allgather failed\n");
+  }
+  req->size = recvParts[0].size;
+#else
+  if (SHARP_COLL_SUCCESS != sharp_coll_do_allgather(cComm->sharpCollComm, &gather_spec)) {
+    WARN("SHARP Allgather failed\n");
+  }
+  req->sharpRequest = (void *) 0xabababab;
+  req->size = recvSize;
+#endif
+  req->requestType = NCCL_SHARP_REQ_SHARP_COLL;
+  *request = req;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclSharpIreducescatter(void* collComm, int nSendParts, ncclNetSGE_v8_t* sendParts, void* recvData,
+                                 size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
+                                 ncclDataType_t dataType, ncclRedOp_t redOp,
+                                 void* recvMhandle, void** request)
+{
+  struct ncclSharpCollComm* cComm = (struct ncclSharpCollComm*)collComm;
+
+  enum sharp_datatype sharp_type = typeConvert(dataType);
+  if (sharp_type == SHARP_DTYPE_NULL) {
+    WARN("SHARP: unsupported data type\n");
+    return ncclInternalError;
+  }
+
+  enum sharp_reduce_op op_type = opConvert(redOp);
+  if (op_type == SHARP_OP_NULL) {
+    WARN("SHARP: unsupported reduce operation\n");
+    return ncclInternalError;
+  }
+
+  assert(nSendParts == 1);
+
+  int dt_size = typeSize(dataType);
+  struct ncclSharpMemHandle *mr_sbuf = (struct ncclSharpMemHandle*)sendParts[0].mhandle;
+  struct ncclSharpMemHandle *mr_rbuf = (struct ncclSharpMemHandle*)recvMhandle;
+
+  struct ncclSharpRequest* req;
+  NCCLCHECK(ncclSharpGetRequest(cComm->reqs, &req));
+
+  struct sharp_coll_reduce_spec reduce_spec;
+
+  reduce_spec.sbuf_desc.buffer.ptr = sendParts[0].address;
+  reduce_spec.sbuf_desc.buffer.length = sendParts[0].size;
+  reduce_spec.sbuf_desc.buffer.mem_handle = mr_sbuf->mr;
+  reduce_spec.sbuf_desc.type = SHARP_DATA_BUFFER;
+  reduce_spec.sbuf_desc.mem_type = (mr_sbuf->type == NCCL_PTR_CUDA ? SHARP_MEM_TYPE_CUDA:SHARP_MEM_TYPE_HOST);
+
+  reduce_spec.rbuf_desc.buffer.ptr = recvData;
+  reduce_spec.rbuf_desc.buffer.length = bytesPerRank;
+  reduce_spec.rbuf_desc.buffer.mem_handle = mr_rbuf->mr;
+  reduce_spec.rbuf_desc.type = SHARP_DATA_BUFFER;
+  reduce_spec.rbuf_desc.mem_type = (mr_rbuf->type == NCCL_PTR_CUDA ? SHARP_MEM_TYPE_CUDA:SHARP_MEM_TYPE_HOST);
+
+  reduce_spec.length = sendParts[0].size / dt_size;
+  reduce_spec.offset = windowOffset;
+  reduce_spec.dtype = sharp_type;
+  reduce_spec.op = op_type;
+  reduce_spec.aggr_mode = SHARP_AGGREGATION_NONE;
+
+#if BLOCKING==0
+  if (SHARP_COLL_SUCCESS != sharp_coll_do_reduce_scatter_nb(cComm->sharpCollComm, &reduce_spec, &req->sharpRequest)) {
+    WARN("SHARP reduce_scatter failed\n");
+  }
+  req->size =  bytesPerRank;
+#else
+  if (SHARP_COLL_SUCCESS != sharp_coll_do_reduce_scatter(cComm->sharpCollComm, &reduce_spec)) {
+    WARN("SHARP reduce_scater failed\n");
+  }
+  req->sharpRequest = (void *) 0xabababab;
+  req->size =  recvCount * dt_size;
+#endif
+  req->requestType = NCCL_SHARP_REQ_SHARP_COLL;
+  *request = req;
+  return ncclSuccess;
+ }
+
 ncclResult_t ncclSharpIflush(void* collComm, void* data, int size, void* mhandle, void **request) {
   struct ncclSharpCollComm *cComm = (struct ncclSharpCollComm*)collComm;
   struct ncclSharpMemHandle *mh = (struct ncclSharpMemHandle *)mhandle;
@@ -567,6 +681,26 @@ ncclResult_t ncclSharpCloseListen(void* listenComm) {
   free(listenComm);
   return status;
 }
+
+ncclCollNet_v8_t ncclCollNetPlugin_v8 = {
+  "SHARP",
+  ncclSharpInit,
+  ncclSharpDevices,
+  ncclSharpGetProperties_v8,
+  ncclSharpListen,
+  ncclSharpConnect,
+  ncclSharpReduceSupport,
+  ncclSharpRegMr,
+  ncclSharpRegMrDmaBuf,
+  ncclSharpDeregMr,
+  ncclSharpIallreduce,
+  ncclSharpIallgather,
+  ncclSharpIreducescatter,
+  ncclSharpIflush,
+  ncclSharpTest,
+  ncclSharpCloseColl,
+  ncclSharpCloseListen
+};
 
 ncclCollNet_v7_t ncclCollNetPlugin_v7 = {
   "SHARP",

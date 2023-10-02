@@ -1157,6 +1157,28 @@ ncclResult_t nccl_ucx_rma_close_listen(void *listen_comm)
   return ncclSuccess;
 }
 
+ncclNet_v8_t ucxRmaPlugin_v8 = {
+  .name = "UCX-RMA",
+  .init = nccl_ucx_rma_init,
+  .devices = nccl_ucx_rma_devices,
+  .getProperties = nccl_ucx_rma_get_properties,
+  .listen = nccl_ucx_rma_listen,
+  .connect = nccl_ucx_rma_connect,
+  .accept = nccl_ucx_rma_accept,
+  .regMr = nccl_ucx_rma_regmr,
+  .regMrDmaBuf = nccl_ucx_rma_regmr_dmabuf,
+  .deregMr = nccl_ucx_rma_deregmr,
+  .isend = nccl_ucx_rma_isend,
+  .irecv = nccl_ucx_rma_irecv,
+  .iflush = nccl_ucx_rma_iflush,
+  .test = nccl_ucx_rma_test,
+  .closeSend = nccl_ucx_rma_close_send,
+  .closeRecv = nccl_ucx_rma_close_recv,
+  .closeListen = nccl_ucx_rma_close_listen,
+  NULL /* getDeviceMr */,
+  NULL /* irecvConsumed */
+};
+
 ncclNet_v7_t ucxRmaPlugin_v7 = {
   .name = "UCX-RMA",
   .init = nccl_ucx_rma_init,
@@ -1177,7 +1199,6 @@ ncclNet_v7_t ucxRmaPlugin_v7 = {
   .closeListen = nccl_ucx_rma_close_listen,
   NULL /* getDeviceMr */,
   NULL /* irecvConsumed */
-
 };
 
 ncclNet_v6_t ucxRmaPlugin_v6 = {

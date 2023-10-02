@@ -1124,6 +1124,28 @@ ncclResult_t ncclIbCloseListen(void* listenComm) {
   return ncclSuccess;
 }
 
+const ncclNet_v8_t ibPlugin_v8 = {
+  .name = "IBext_v8",
+  .init = ncclIbInit,
+  .devices = ncclIbDevices,
+  .getProperties = ncclIbGetProperties,
+  .listen = ncclIbListen,
+  .connect = ncclIbConnect,
+  .accept = ncclIbAccept,
+  .regMr = ncclIbRegMr,
+  .regMrDmaBuf = ncclIbRegMrDmaBuf,
+  .deregMr = ncclIbDeregMr,
+  .isend = ncclIbIsend,
+  .irecv = ncclIbIrecv,
+  .iflush = ncclIbIflush,
+  .test = ncclIbTest,
+  .closeSend = ncclIbCloseSend,
+  .closeRecv = ncclIbCloseRecv,
+  .closeListen = ncclIbCloseListen,
+  NULL /* getDeviceMr */,
+  NULL /* irecvConsumed */
+};
+
 const ncclNet_v7_t ibPlugin_v7 = {
   .name = "IBext_v7",
   .init = ncclIbInit,
