@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2020, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -40,23 +40,6 @@ static const ucp_tag_t tag      = 0x8a000000;
 static const ucp_tag_t tag_mask = (uint64_t)(-1);
 
 static int ncclNIbDevs = -1;
-
-/*
- * If request == REQUEST_COMPLETED_ZERO_LENGTGH:
- *  ucp_send or ucp_recv was completed immediately and worker progress is not needed
- *  message size == 0 and gpu flush is not needed
- * 
- * If request == REQUEST_COMPLETED_NON_ZERO_LENGTH:
- *  ucp_send or ucp_recv was completed immediately and worker progres is not needed
- *  message size > 0 and gpu flush is needed
- * 
- * If request != REQUEST_COMPLETED_ZERO_LENGTGH and request != REQUEST_COMPLETED_NON_ZERO_LENGTH:
- *  normal ucp request.
- */
-enum {
-  REQUEST_COMPLETED_ZERO_LENGTGH    = 1,
-  REQUEST_COMPLETED_NON_ZERO_LENGTH = 2
-};
 
 enum ncclUCXCommState {
   ncclUCXCommStateStart = 0,
