@@ -184,10 +184,8 @@ typedef struct ucx_comm {
   void            *connect_req;  /* msg request */
 } ucx_comm_t;
 
-
 static void send_handler_nbx(void *request, ucs_status_t status,
-                             void *user_data)
-{
+                             void *user_data) {
   int *pending = user_data;
 
   assert(status == UCS_OK);
@@ -198,9 +196,7 @@ static void send_handler_nbx(void *request, ucs_status_t status,
 
 static void recv_handler_nbx(void *request, ucs_status_t status,
                              const ucp_tag_recv_info_t *tag_info,
-                             void *user_data)
-{
-  assert(status == UCS_OK);
+                             void *user_data) {
   send_handler_nbx(request, status, user_data);
 }
 
@@ -222,8 +218,8 @@ static ncclResult_t ucx_init_context(ucp_context_h *ctx, int dev) {
   UCXCHECK(ucp_config_modify(config, "NET_DEVICES", ucx_dev_name));
 
   memset(&ucp_params, 0, sizeof(ucp_params));
-  ucp_params.field_mask   = UCP_PARAM_FIELD_FEATURES;
-  ucp_params.features     = UCP_FEATURE_TAG | UCP_FEATURE_RMA;
+  ucp_params.field_mask = UCP_PARAM_FIELD_FEATURES;
+  ucp_params.features   = UCP_FEATURE_TAG | UCP_FEATURE_RMA;
 
   UCXCHECK(ucp_init(&ucp_params, config, ctx));
   ucp_config_release(config);
@@ -391,13 +387,12 @@ ncclResult_t nccl_ucx_listen(int dev, void *handle, void **listen_comm) {
   return ncclSuccess;
 }
 
-static void ucx_request_init(ucx_comm_t *comm)
-{
-    static const int entries = sizeof(comm->reqs) / sizeof(*comm->reqs);
+static void ucx_request_init(ucx_comm_t *comm) {
+  static const int entries = sizeof(comm->reqs) / sizeof(*comm->reqs);
 
-    for (int i = 0; i < entries; i++) {
-        comm->reqs[i].used = 0;
-    }
+  for (int i = 0; i < entries; i++) {
+    comm->reqs[i].used = 0;
+  }
 }
 
 ncclResult_t nccl_ucx_connect(int dev, void *handle, void **send_comm, ncclNetDeviceHandle_t** sendDevComm) {
@@ -565,46 +560,43 @@ ncclResult_t nccl_ucx_regmr_dmabuf(void* comm, void* data, size_t size, int type
 	return nccl_ucx_regmr(comm, data, size, type, mhandle);
 }
 
-static ucx_request_t *ucx_request_get(ucx_comm_t *comm)
-{
-    static const size_t entries = sizeof(comm->reqs) / sizeof(*comm->reqs);
-    ucx_request_t *req;
+static ucx_request_t *ucx_request_get(ucx_comm_t *comm) {
+  static const size_t entries = sizeof(comm->reqs) / sizeof(*comm->reqs);
+  ucx_request_t *req;
 
-    for (int i = 0; i < entries; i++) {
-        req = &comm->reqs[i];
-        if (req->used == 0) {
-            req->worker  = comm->worker;
-            req->pending = 0;
-            req->count   = 0;
-            req->used    = 1;
-            return req;
-        }
+  for (int i = 0; i < entries; i++) {
+    req = &comm->reqs[i];
+    if (req->used == 0) {
+      req->worker  = comm->worker;
+      req->pending = 0;
+      req->count   = 0;
+      req->used    = 1;
+      return req;
     }
+  }
 
-    WARN("NET/UCX : unable to allocate NCCL request");
-    return NULL;
+  WARN("NET/UCX: unable to allocate NCCL request");
+  return NULL;
 }
 
-static void ucx_request_release(ucx_request_t *req)
-{
+static void ucx_request_release(ucx_request_t *req) {
     req->used = 0;
 }
 
-void ucx_request_add(ucx_request_t *req, int size)
-{
+static void ucx_request_add(ucx_request_t *req, int size) {
   req->size[req->count] = size;
   req->pending++;
   req->count++;
 }
 
-ncclResult_t ucx_send_check(ucx_comm_t *comm) {
-  ucp_request_param_t   params;
-  ucp_tag_message_h     msg_tag;
-  ucp_tag_recv_info_t   info_tag;
-  connect_msg_t         *msg;
-  ucp_ep_params_t       ep_params;
-  void                  *ucp_req;
-  int                   pending;
+static ncclResult_t ucx_send_check(ucx_comm_t *comm) {
+  ucp_request_param_t params;
+  ucp_tag_message_h   msg_tag;
+  ucp_tag_recv_info_t info_tag;
+  connect_msg_t       *msg;
+  ucp_ep_params_t     ep_params;
+  void                *ucp_req;
+  int                 pending;
 
   ucp_worker_progress(comm->worker);
 
@@ -631,11 +623,11 @@ ncclResult_t ucx_send_check(ucx_comm_t *comm) {
     free(msg);
     return ncclSystemError;
   } else if (ucp_req == NULL) {
-      pending--;
+    pending--;
   }
 
   while (pending > 0) {
-      ucp_worker_progress(comm->worker);
+    ucp_worker_progress(comm->worker);
   }
 
   ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
@@ -647,29 +639,26 @@ ncclResult_t ucx_send_check(ucx_comm_t *comm) {
   return ncclSuccess;
 }
 
-static void ucx_recv_set_ready(ucx_comm_t *comm)
-{
-    comm->ready = 1;
-    free(comm->msg);
-    comm->msg = NULL;
+static void ucx_recv_set_ready(ucx_comm_t *comm) {
+  free(comm->msg);
+  comm->msg   = NULL;
+  comm->ready = 1;
 }
 
-static void check_handler(void *request, ucs_status_t status,
-                          void *user_data)
-{
-    assert(status == UCS_OK);
-    ucx_recv_set_ready((ucx_comm_t *)user_data);
-    ucp_request_free(request);
+static void check_handler(void *request, ucs_status_t status, void *user_data) {
+  assert(status == UCS_OK);
+  ucx_recv_set_ready((ucx_comm_t*)user_data);
+  ucp_request_free(request);
 }
 
 ncclResult_t ucx_recv_check(ucx_comm_t *comm) {
   ucp_request_param_t params;
-  ucp_address_t *my_addr;
-  size_t        local_addr_len;
-  size_t        msg_len;
+  ucp_address_t       *my_addr;
+  size_t              local_addr_len;
+  size_t              msg_len;
 
   if (comm->connect_req != NULL) {
-      goto done;
+    goto done;
   }
 
   NCCLCHECK(ucx_worker_get_netaddress(comm->worker, &my_addr, &local_addr_len));
@@ -680,23 +669,22 @@ ncclResult_t ucx_recv_check(ucx_comm_t *comm) {
   comm->msg->addr_len = local_addr_len;
   memcpy(comm->msg + 1, my_addr, local_addr_len);
 
-  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK  |
+  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
                         UCP_OP_ATTR_FIELD_USER_DATA |
                         UCP_OP_ATTR_FIELD_DATATYPE;
   params.cb.send      = check_handler;
   params.user_data    = comm;
   params.datatype     = ucp_dt_make_contig(1);
 
-  /* TODO: Use customs tags for connection establishment */
   comm->connect_req   = ucp_tag_send_nbx(comm->ep, comm->msg, msg_len,
                                          comm->ctag, &params);
   if (UCS_PTR_IS_ERR(comm->connect_req)) {
-      WARN("Unable to send connect message");
-      free(comm->msg);
-      return ncclSystemError;
+    WARN("Unable to send connect message");
+    free(comm->msg);
+    return ncclSystemError;
   } else if (comm->connect_req == NULL) {
-      ucx_recv_set_ready(comm);
-      return ncclSuccess;
+    ucx_recv_set_ready(comm);
+    return ncclSuccess;
   }
 
 done:
@@ -706,6 +694,8 @@ done:
 
 static ucp_tag_t nccl_ucx_ucp_tag(ucp_tag_t comm_tag, uint64_t tag)
 {
+  assert(tag <= UINT32_MAX);
+  assert(comm_tag <= UINT32_MAX);
   return comm_tag + (tag << 32);
 }
 
@@ -728,7 +718,7 @@ static ncclResult_t nccl_ucx_isend(void *send_comm, void *data, int size,
 
   req = ucx_request_get(comm);
   if (req == NULL) {
-      return ncclInternalError;
+    return ncclInternalError;
   }
 
   ucx_request_add(req, size);
@@ -751,7 +741,7 @@ static ncclResult_t nccl_ucx_isend(void *send_comm, void *data, int size,
          ucs_status_string(UCS_PTR_STATUS(ucp_req)));
     return ncclSystemError;
   } else if (ucp_req == NULL) {
-      req->pending--;
+    req->pending--;
   }
 
   *request = req;
@@ -769,61 +759,61 @@ static ncclResult_t nccl_ucx_irecv(void *recv_comm, int n, void **data,
   ucp_request_param_t params;
 
   if (comm->ready == 0) {
-      NCCLCHECK(ucx_recv_check(comm));
-      if (comm->ready == 0) {
-          *request = NULL;
-          return ncclSuccess;
-      }
+    NCCLCHECK(ucx_recv_check(comm));
+    if (comm->ready == 0) {
+      *request = NULL;
+      return ncclSuccess;
+    }
   }
 
   if (n > NCCL_NET_IB_MAX_RECVS) {
-      WARN("ucx_irecv: posting %d but max is %d", n, NCCL_NET_IB_MAX_RECVS);
-      return ncclInternalError;
+    WARN("ucx_irecv: posting %d but max is %d", n, NCCL_NET_IB_MAX_RECVS);
+    return ncclInternalError;
   }
 
   req = ucx_request_get(comm);
   if (req == NULL) {
-      return ncclInternalError;
+    return ncclInternalError;
   }
 
   for (int i = 0; i < n; i++) {
-      ucx_request_add(req, sizes[i]);
+    ucx_request_add(req, sizes[i]);
 
-      params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-                            UCP_OP_ATTR_FIELD_USER_DATA |
-                            UCP_OP_ATTR_FIELD_DATATYPE;
-      params.cb.recv      = recv_handler_nbx;
-      params.user_data    = &req->pending;
-      params.datatype     = ucp_dt_make_contig(1);
-      if (mh[i]) {
-          params.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMORY_TYPE;
-          params.memory_type   = mh[i]->mem_type;
-      }
+    params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+                          UCP_OP_ATTR_FIELD_USER_DATA |
+                          UCP_OP_ATTR_FIELD_DATATYPE;
+    params.cb.recv      = recv_handler_nbx;
+    params.user_data    = &req->pending;
+    params.datatype     = ucp_dt_make_contig(1);
+    if (mh[i]) {
+      params.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+      params.memory_type   = mh[i]->mem_type;
+    }
 
-      ucp_req = ucp_tag_recv_nbx(comm->worker, data[i], sizes[i],
-                                 nccl_ucx_ucp_tag(comm->tag, tags[i]),
-                                 tag_mask, &params);
-      if (UCS_PTR_IS_ERR(ucp_req)) {
-          WARN("ucx_irecv: unable to post receive %d/%d (%s)",
-               i, n, ucs_status_string(UCS_PTR_STATUS(ucp_req)));
-          return ncclSystemError;
-      } else if (ucp_req == NULL) {
-          req->pending--;
-      }
+    ucp_req = ucp_tag_recv_nbx(comm->worker, data[i], sizes[i],
+                               nccl_ucx_ucp_tag(comm->tag, tags[i]), tag_mask,
+                               &params);
+    if (UCS_PTR_IS_ERR(ucp_req)) {
+      WARN("ucx_irecv: unable to post receive %d/%d (%s)", i, n,
+           ucs_status_string(UCS_PTR_STATUS(ucp_req)));
+      return ncclSystemError;
+    } else if (ucp_req == NULL) {
+      req->pending--;
+    }
   }
 
   *request = req;
   return ncclSuccess;
 }
 
-ncclResult_t nccl_ucx_iflush(void *recv_comm, int n, void** data, int* sizes,
+ncclResult_t nccl_ucx_iflush(void *recv_comm, int n, void **data, int *sizes,
                              void **mhandle, void **request) {
-  int last                 = -1;
-  int size                 = 1;
-  ucx_comm_t         *comm = (ucx_comm_t *)recv_comm;
-  ucx_mhandle_t      **mh  = (ucx_mhandle_t**)mhandle;
-  ucx_request_t      *req;
-  void               *ucp_req;
+  int last            = -1;
+  int size            = 1;
+  ucx_comm_t    *comm = (ucx_comm_t *)recv_comm;
+  ucx_mhandle_t **mh  = (ucx_mhandle_t**)mhandle;
+  ucx_request_t *req;
+  void *ucp_req;
   ucp_request_param_t params;
 
   *request = NULL;
@@ -832,7 +822,7 @@ ncclResult_t nccl_ucx_iflush(void *recv_comm, int n, void** data, int* sizes,
 
   req = ucx_request_get(comm);
   if (req == NULL) {
-      return ncclInternalError;
+    return ncclInternalError;
   }
 
   ucx_request_add(req, size);
@@ -848,7 +838,7 @@ ncclResult_t nccl_ucx_iflush(void *recv_comm, int n, void** data, int* sizes,
          ucs_status_string(UCS_PTR_STATUS(ucp_req)));
     return ncclSystemError;
   } else if (ucp_req == NULL) {
-      req->pending--;
+    req->pending--;
   }
 
   *request = req;
@@ -860,19 +850,19 @@ static ncclResult_t nccl_ucx_test(void *request, int *done, int *size) {
   unsigned p;
 
   while (req->pending > 0) {
-      p = ucp_worker_progress(req->worker);
-      if (!p) {
-          *done = 0;
-          return ncclSuccess;
-      }
+    p = ucp_worker_progress(req->worker);
+    if (!p) {
+      *done = 0;
+      return ncclSuccess;
+    }
   }
 
   *done = 1;
   if (size != NULL) {
-      /* Posted receives have completed */
-      for (int i = 0; i < req->count; i++) {
-          size[i] = req->size[i];
-      }
+    /* Posted receives have completed */
+    for (int i = 0; i < req->count; i++) {
+      size[i] = req->size[i];
+    }
   }
 
   ucx_request_release(req);
@@ -889,7 +879,7 @@ static void wait_close(ucp_worker_h worker, void *ucp_req) {
     } while(status == UCS_INPROGRESS);
     ucp_request_free(ucp_req);
   } else if (ucp_req != NULL) {
-      WARN("Failed to close UCX endpoint");
+    WARN("Failed to close UCX endpoint");
   }
 }
 
@@ -929,7 +919,7 @@ ncclResult_t nccl_ucx_close_recv(void *recv_comm) {
     nccl_ucx_free_worker(comm->worker);
     free(comm);
   }
-  
+
   return ncclSuccess;
 }
 
