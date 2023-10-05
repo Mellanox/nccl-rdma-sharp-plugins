@@ -532,12 +532,9 @@ ncclResult_t nccl_ucx_regmr(void* comm, void* data, int size, int type, void** m
                            UCP_MEM_MAP_PARAM_FIELD_LENGTH; 
   mmap_params.address    = (void*)reg_addr;
   mmap_params.length     = reg_size;  
-  mh->mem_type = type;
-#if UCP_API_VERSION >= UCP_VERSION(1, 10)
   mh->mem_type = (type == NCCL_PTR_HOST)? UCS_MEMORY_TYPE_HOST: UCS_MEMORY_TYPE_CUDA;
   mmap_params.field_mask  |= UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE; 
   mmap_params.memory_type = mh->mem_type;
-#endif
 
   UCXCHECK(ucp_mem_map(ctx->ucp_ctx, &mmap_params, &mh->ucp_memh));
   if (ctx->gpuFlush.enabled) {
