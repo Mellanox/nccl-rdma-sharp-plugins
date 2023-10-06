@@ -11,11 +11,11 @@ config.guess
 config.h.in
 config.h.in~
 config.sub
-config/m4/libtool.m4
-config/m4/ltoptions.m4
-config/m4/ltsugar.m4
-config/m4/ltversion.m4
-config/m4/lt~obsolete.m4
+m4/libtool.m4
+m4/ltoptions.m4
+m4/ltsugar.m4
+m4/ltversion.m4
+m4/lt~obsolete.m4
 config/aux
 configure
 install-sh
@@ -43,6 +43,8 @@ debian/changelog
 debian/control
 debian/rules
 debian/sharp.postinst
+debian/nccl-rdma-sharp-plugins.postinst
+debian/nccl-rdma-sharp-plugins.prem
 sharp.spec
 sharp.pc
 doc/doxygen-doc
@@ -56,6 +58,8 @@ valgrind*xml
 jenkins/*
 sharp-*
 config.cache
+nccl-rdma-sharp-plugins.pc
+nccl-rdma-sharp-plugins.spec
 
 # Prerequisites
 *.d
