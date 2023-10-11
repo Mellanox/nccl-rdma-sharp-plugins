@@ -610,11 +610,9 @@ static ncclResult_t ucx_send_check(ucx_comm_t *comm) {
 
   params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK  |
                         UCP_OP_ATTR_FIELD_USER_DATA |
-                        UCP_OP_ATTR_FIELD_DATATYPE  |
                         UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
   params.cb.recv      = recv_handler_nbx;
   params.user_data    = &pending;
-  params.datatype     = ucp_dt_make_contig(1);
   ucp_req = ucp_tag_msg_recv_nbx(comm->worker, msg, info_tag.length,
                                  msg_tag, &params);
   if (UCS_PTR_IS_ERR(ucp_req)) {
@@ -670,11 +668,9 @@ ncclResult_t ucx_recv_check(ucx_comm_t *comm) {
   memcpy(comm->msg + 1, my_addr, local_addr_len);
 
   params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-                        UCP_OP_ATTR_FIELD_USER_DATA |
-                        UCP_OP_ATTR_FIELD_DATATYPE;
+                        UCP_OP_ATTR_FIELD_USER_DATA;
   params.cb.send      = check_handler;
   params.user_data    = comm;
-  params.datatype     = ucp_dt_make_contig(1);
 
   comm->connect_req   = ucp_tag_send_nbx(comm->ep, comm->msg, msg_len,
                                          comm->ctag, &params);
@@ -724,11 +720,9 @@ static ncclResult_t nccl_ucx_isend(void *send_comm, void *data, int size,
   ucx_request_add(req, size);
 
   params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-                        UCP_OP_ATTR_FIELD_USER_DATA |
-                        UCP_OP_ATTR_FIELD_DATATYPE;
+                        UCP_OP_ATTR_FIELD_USER_DATA;
   params.cb.send      = send_handler_nbx;
   params.user_data    = &req->pending;
-  params.datatype     = ucp_dt_make_contig(1);
   if (mh) {
     params.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMORY_TYPE;
     params.memory_type   = mh->mem_type;
@@ -780,11 +774,9 @@ static ncclResult_t nccl_ucx_irecv(void *recv_comm, int n, void **data,
     ucx_request_add(req, sizes[i]);
 
     params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-                          UCP_OP_ATTR_FIELD_USER_DATA |
-                          UCP_OP_ATTR_FIELD_DATATYPE;
+                          UCP_OP_ATTR_FIELD_USER_DATA;
     params.cb.recv      = recv_handler_nbx;
     params.user_data    = &req->pending;
-    params.datatype     = ucp_dt_make_contig(1);
     if (mh[i]) {
       params.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMORY_TYPE;
       params.memory_type   = mh[i]->mem_type;
