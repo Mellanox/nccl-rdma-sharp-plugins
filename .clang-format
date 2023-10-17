@@ -1,0 +1,9 @@
+IndentWidth: 2
+AlignEscapedNewlines: Indent
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: false
+AlignConsecutiveStructMembers: true
+AlignConsecutiveMacros: true
+AlignDeclarationByPointer: true
+AlignAfterOpenBracket: true
+AlignOperands: true
