@@ -624,6 +624,7 @@ static ncclResult_t ucx_send_check(ucx_comm_t *comm) {
       status = ucp_request_check_status(ucp_req);
     } while (status == UCS_INPROGRESS);
     assert(status == UCS_OK);
+    ucp_request_free(ucp_req);
   }
 
   ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
