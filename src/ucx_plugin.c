@@ -210,11 +210,6 @@ static void recv_handler_nbx(void *request, ucs_status_t status,
 static union ncclSocketAddress nccl_ucx_if_addr;
 static char if_name[MAX_IF_NAME_SIZE];
 
-static ncclResult_t GetSocketAddr(union ncclSocketAddress *addr) {
-  memcpy(addr, &nccl_ucx_if_addr, sizeof(*addr));
-  return ncclSuccess;
-}
-
 static ncclResult_t ucx_init_context(ucp_context_h *ctx, int dev) {
   ucp_params_t ucp_params;
   ucp_config_t *config;
@@ -306,7 +301,7 @@ static ncclResult_t ucx_get_ctx_and_worker(int dev, ucp_context_h *ctx,
 }
 
 static ncclResult_t nccl_ucx_free_worker(ucp_worker_h worker) {
-  int i, dummy, count, done = 0;
+  int i, dummy, count = 0 /* fix warning */, done = 0;
   struct ep_list *ep, *cur;
   struct nccl_ucx_worker *ucx_worker, *next;
   ncclResult_t result;
@@ -419,14 +414,14 @@ static void ucx_request_init(ucx_comm_t *comm) {
 }
 
 ncclResult_t nccl_ucx_connect(int dev, void *handle, void **send_comm, ncclNetDeviceHandle_t** sendDevComm) {
-  ucx_listen_handle_t  *recv_handle = (ucx_listen_handle_t*)handle;
-  struct ncclUCXCommStage* stage = &recv_handle->stage;
-  ucx_comm_t           *comm = stage->comm;
-  ucp_address_t        *my_addr;
-  size_t               local_addr_len;
-  enum ncclSocketState conState;
+  ucx_listen_handle_t     *recv_handle = (ucx_listen_handle_t*)handle;
+  struct ncclUCXCommStage *stage       = &recv_handle->stage;
+  ucx_comm_t              *comm        = stage->comm;
+  ucp_address_t           *my_addr;
+  size_t                  local_addr_len;
+  int                     ready;
+
   *send_comm = NULL;
-  int ready;
 
   if (stage->state == ncclUCXCommStateConnect) goto ucx_connect_check;
 
@@ -466,13 +461,11 @@ ncclResult_t nccl_ucx_connect_v6(int dev, void *handle, void **send_comm) {
 ncclResult_t nccl_ucx_accept(void *listen_comm, void **recv_comm, ncclNetDeviceHandle_v7_t** recvDevComm)
 {
   ucx_listen_comm_t  *l_comm = (ucx_listen_comm_t *)listen_comm;
-  socklen_t          socklen = sizeof(struct sockaddr_in);
   struct ncclUCXCommStage* stage = &l_comm->stage;
   ucx_comm_t         *r_comm = (ucx_comm_t *)stage->comm;
   size_t             peer_addr_len;
   ucp_address_t      *peer_addr;
   ucp_ep_params_t    ep_params;
-  struct sockaddr_in sockaddr;
   int                ready;
 
   *recv_comm = NULL;
@@ -584,10 +577,8 @@ ncclResult_t nccl_ucx_regmr_dmabuf(void* comm, void* data, size_t size, int type
 }
 
 static ucx_request_t *ucx_request_get(ucx_comm_t *comm) {
-  static const size_t entries = sizeof(comm->reqs) / sizeof(*comm->reqs);
-  ucx_request_t *req;
+  ucx_request_t *req = comm->free_req;
 
-  req = comm->free_req;
   if (req == NULL) {
     WARN("NET/UCX: unable to allocate NCCL request");
     return NULL;

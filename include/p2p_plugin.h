@@ -9,8 +9,6 @@
 
 #include <stdint.h>
 #include <unistd.h>
-#define ENABLE_TIMER 0
-#include "timer.h"
 #include <assert.h>
 
 #include "nccl.h"

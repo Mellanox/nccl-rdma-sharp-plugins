@@ -50,9 +50,9 @@ AC_ARG_ENABLE([debug],AS_HELP_STRING([--enable-debug], [Enable extra debugging c
 
 if test $enable_debug = yes; then
 	AC_DEFINE([ENABLE_DEBUG], [1], [Enable debugging code])
-	CFLAGS="$CFLAGS -O0 -g3 -Werror"
+	CFLAGS="$CFLAGS -O0 -g3 -Wall -Werror"
 else
-	CFLAGS="$CFLAGS -O3 -DNDEBUG -Werror"
+	CFLAGS="$CFLAGS -O3 -DNDEBUG -Wall -Werror"
 fi
 
 #check for cuda

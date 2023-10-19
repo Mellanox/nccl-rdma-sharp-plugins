@@ -13,9 +13,9 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <unistd.h>
+
 #define ENABLE_TIMER 0
 #include "timer.h"
-
 #include "p2p_plugin.h"
 #include "core.h"
 #include "socket.h"
@@ -46,25 +46,11 @@ NCCL_PARAM(IbTc, "IB_TC", 0);
 NCCL_PARAM(IbArThreshold, "IB_AR_THRESHOLD", 8192);
 NCCL_PARAM(IbPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 2);
 
-pthread_t ncclIbAsyncThread;
-static void* ncclIbAsyncThreadMain(void* args) {
-  struct ibv_context* context = (struct ibv_context*)args;
-  while (1) {
-    struct ibv_async_event event;
-    if (ncclSuccess != wrap_ibv_get_async_event(context, &event)) { break; }
-    char *str;
-    if (ncclSuccess != wrap_ibv_event_type_str(&str, event.event_type)) { break; }
-    if (event.event_type != IBV_EVENT_COMM_EST)
-      WARN("NET/IB : Got async event : %s", str);
-    if (ncclSuccess != wrap_ibv_ack_async_event(&event)) { break; }
-  }
-  return NULL;
-}
+static pthread_t ncclIbAsyncThread;
 
 // Determine whether RELAXED_ORDERING is enabled and possible
 int ncclIbRelaxedOrderingCapable(void) {
   int roMode = ncclParamIbPciRelaxedOrdering();
-  ncclResult_t r = ncclInternalError;
   if (roMode == 1 || roMode == 2) {
     if (!IBV_ACCESS_RELAXED_ORDERING) {
       if(roMode == 1)
@@ -107,11 +93,6 @@ ncclResult_t ncclIbGetProperties_v6(int dev, ncclNetProperties_v6_t* props_v6)
   props_v6->maxComms = props.maxComms;
   props_v6->maxRecvs = props.maxRecvs;
 
-  return ncclSuccess;
-}
-
-static ncclResult_t GetSocketAddr(union ncclSocketAddress* addr) {
-  memcpy(addr, &ncclIbIfAddr, sizeof(*addr));
   return ncclSuccess;
 }
 
@@ -365,7 +346,6 @@ ncclResult_t ncclIbListen(int dev, void* opaqueHandle, void** listenComm) {
 
 ncclResult_t ncclIbConnect(int dev, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** sendDevComm) {
   struct ncclIbHandle* handle = (struct ncclIbHandle*) opaqueHandle;
-  enum ncclSocketState conState;
   struct ncclIbCommStage* stage = &handle->stage;
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)stage->comm;
   struct ncclIbQpInfo remQpInfo;
