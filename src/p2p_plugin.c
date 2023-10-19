@@ -65,7 +65,6 @@ static nccl_p2p_plugin_t p2p_plugin = NCCL_P2P_LAST;
 
 static void pluginSetup()
 {
-
   p2p_plugin = NCCL_P2P_IB;
   const char *plugin_path = get_plugin_lib_path();
   if (plugin_path != NULL) {
@@ -84,11 +83,6 @@ static void pluginSetup()
     }
   }
   switch (p2p_plugin) {
-    case NCCL_P2P_IB:
-      ncclNetPlugin_v7 = ibPlugin_v7;
-      ncclNetPlugin_v6 = ibPlugin_v6;
-      ncclNetPlugin_v5 = ibPlugin_v5;
-      break;
 #ifdef HAVE_UCX_PLUGIN
     case NCCL_P2P_UCX:
       ncclNetPlugin_v7 = ucxPlugin_v7;
@@ -101,6 +95,11 @@ static void pluginSetup()
       ncclNetPlugin_v5 = ucxRmaPlugin_v5;
       break;
 #endif
+    default:
+      ncclNetPlugin_v7 = ibPlugin_v7;
+      ncclNetPlugin_v6 = ibPlugin_v6;
+      ncclNetPlugin_v5 = ibPlugin_v5;
+      break;
   }
 
 }
@@ -413,4 +412,3 @@ nccl_p2p_plugin_t nccl_p2p_get_plugin_type()
 
 struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
 struct ncclIbDev userIbDevs[MAX_IB_DEVS];
-

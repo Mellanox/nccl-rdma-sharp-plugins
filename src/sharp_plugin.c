@@ -138,7 +138,7 @@ int ncclSharpAllGather(void *context, void *buf, int len) {
        if (rrequest == NULL) NCCLCHECK(ncclNetPlugin_v7.irecv(cComm->recvComm, 1, &rbuf, &len, &tag, &rMhandle, &rrequest));
     }
     while (srequest || rrequest) {
-      int done;
+      int done = 0; /* silent uninitialized false positive */
       if (rrequest) NCCLCHECK(ncclNetPlugin_v7.test(rrequest, &done, NULL));
       if (done) rrequest = NULL;
       if (srequest) NCCLCHECK(ncclNetPlugin_v7.test(srequest, &done, NULL));

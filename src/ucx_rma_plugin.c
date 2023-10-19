@@ -212,11 +212,6 @@ typedef struct nccl_ucx_rma_recv_comm {
 static union ncclSocketAddress nccl_ucx_if_addr;
 static char if_name[MAX_IF_NAME_SIZE];
 
-static ncclResult_t GetSocketAddr(union ncclSocketAddress *addr) {
-  memcpy(addr, &nccl_ucx_if_addr, sizeof(*addr));
-  return ncclSuccess;
-}
-
 typedef struct nccl_ucx_am_request {
   nccl_ucx_rma_request_t *req;
 } nccl_ucx_am_request_t;
@@ -425,13 +420,19 @@ static ucs_status_t nccl_ucx_rma_am_rkey_cb(void *arg, void *data, size_t length
 {
   nccl_ucx_rma_send_comm_t *comm     = (nccl_ucx_rma_send_comm_t*)arg;
   nccl_ucx_rma_rkey_buf_t  *rkey_buf = (nccl_ucx_rma_rkey_buf_t*)data;
+  ucs_status_t status;
   
   if (comm->rkeys[rkey_buf->index].rkey) {
     ucp_rkey_destroy(comm->rkeys[rkey_buf->index].rkey);
   }
   comm->rkeys[rkey_buf->index].id = rkey_buf->id;
-  UCXCHECK(ucp_ep_rkey_unpack(comm->ep, rkey_buf->buf,
-                              &comm->rkeys[rkey_buf->index].rkey));
+  status = ucp_ep_rkey_unpack(comm->ep, rkey_buf->buf,
+                              &comm->rkeys[rkey_buf->index].rkey);
+  if (status != UCS_OK) {
+    WARN("Failed: UCX am rkey cb: rkey unpack error %s",
+         ucs_status_string(status));
+  }
+
   return UCS_OK;
 }
 
@@ -439,8 +440,8 @@ static ucs_status_t nccl_ucx_rma_am_rkey_cb(void *arg, void *data, size_t length
 ncclResult_t nccl_ucx_rma_connect(int dev, void *handle, void **send_comm, ncclNetDeviceHandle_t** sendDevComm)
 {
   ucx_rma_listen_handle_t  *recv_handle = (ucx_rma_listen_handle_t*)handle;
-  struct ncclUCXCommStage* stage = &recv_handle->stage;
-  nccl_ucx_rma_send_comm_t *comm = stage->comm;
+  struct ncclUCXCommStage* stage        = &recv_handle->stage;
+  nccl_ucx_rma_send_comm_t *comm        = stage->comm;
   ucp_mem_map_params_t     mmap_params;
   size_t                   rkey_buf_size;
   void                     *rkey_buf;
@@ -549,10 +550,8 @@ static ncclResult_t nccl_ucx_rma_init_ep(struct ncclSocket *sock, ucp_worker_h w
 ncclResult_t nccl_ucx_rma_accept(void *listen_comm, void **recv_comm, ncclNetDeviceHandle_v7_t** recvDevComm)
 {
   nccl_ucx_rma_listen_comm_t *l_comm = (nccl_ucx_rma_listen_comm_t *)listen_comm;
-  socklen_t                  socklen = sizeof(struct sockaddr_in);
-  struct ncclUCXCommStage* stage = &l_comm->stage;
-  nccl_ucx_rma_recv_comm_t   *r_comm;
-  struct sockaddr_in         sockaddr;
+  struct ncclUCXCommStage*   stage   = &l_comm->stage;
+  nccl_ucx_rma_recv_comm_t   *r_comm = stage->comm;
   void                       *rkey_buf;
   size_t                     rkey_buf_size;
   int                        ready;
@@ -1126,7 +1125,6 @@ ncclResult_t nccl_ucx_rma_close_recv(void *recv_comm)
 {
   nccl_ucx_rma_recv_comm_t *comm = (nccl_ucx_rma_recv_comm_t*)recv_comm;
   void *close_req;
-  int debug = 1;
   int close = 1;
 
   if (recv_comm) {

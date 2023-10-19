@@ -52,9 +52,9 @@ static double startTimes[8];
   printf("\n"); \
 } while (0);
 #else
-#define TIME_START(index) while(0);
-#define TIME_STOP(index) while(0);
-#define TIME_CANCEL(index) while(0);
+#define TIME_START(index) do {} while(0);
+#define TIME_STOP(index) do {} while(0);
+#define TIME_CANCEL(index) do {} while(0);
 #define TIME_PRINT(name)
 #endif
 #endif

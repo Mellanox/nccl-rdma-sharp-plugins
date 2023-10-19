@@ -110,60 +110,6 @@ int matchIfList(const char* string, int port, struct netIf* ifList, int listSize
   return 0;
 }
 
-static size_t readFileVarArg(char *buffer, size_t max,
-    const char *filename_fmt, va_list ap)
-{
-  char filename[PATH_MAX];
-  ssize_t read_bytes;
-  int fd;
-
-  vsnprintf(filename, PATH_MAX, filename_fmt, ap);
-
-  fd = open(filename, O_RDONLY);
-  if (fd < 0) {
-    return -1;
-  }
-
-  read_bytes = read(fd, buffer, max - 1);
-  if (read_bytes < 0) {
-    return -1;
-  }
-
-  if (read_bytes < max) {
-    buffer[read_bytes] = '\0';
-  }
-
-out_close:
-  close(fd);
-}
-
-int readFileNumber(long *value, const char *filename_fmt, ...)
-{
-  char buffer[64], *tail;
-  ssize_t read_bytes;
-  va_list ap;
-  long n;
-
-  va_start(ap, filename_fmt);
-  read_bytes = readFileVarArg(buffer, sizeof(buffer) - 1,
-      filename_fmt, ap);
-  va_end(ap);
-
-  if (read_bytes < 0) {
-    /* read error */
-    return -1;
-  }
-
-  n = strtol(buffer, &tail, 0);
-  if ((*tail != '\0') && !isspace(*tail)) {
-    /* parse error */
-    return -1;
-  }
-
-  *value = n;
-  return 0;
-}
-
 const char *get_plugin_lib_path()
 {
   Dl_info dl_info;
