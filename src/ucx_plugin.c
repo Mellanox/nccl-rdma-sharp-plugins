@@ -403,7 +403,7 @@ static void ucx_request_init(ucx_comm_t *comm) {
 ncclResult_t nccl_ucx_connect(int dev, void *handle, void **send_comm, ncclNetDeviceHandle_t** sendDevComm) {
   ucx_listen_handle_t  *recv_handle = (ucx_listen_handle_t*)handle;
   struct ncclUCXCommStage* stage = &recv_handle->stage;
-  ucx_comm_t           *comm;
+  ucx_comm_t           *comm = stage->comm;
   ucp_address_t        *my_addr;
   size_t               local_addr_len;
   enum ncclSocketState conState;

@@ -440,7 +440,7 @@ ncclResult_t nccl_ucx_rma_connect(int dev, void *handle, void **send_comm, ncclN
 {
   ucx_rma_listen_handle_t  *recv_handle = (ucx_rma_listen_handle_t*)handle;
   struct ncclUCXCommStage* stage = &recv_handle->stage;
-  nccl_ucx_rma_send_comm_t *comm;
+  nccl_ucx_rma_send_comm_t *comm = stage->comm;
   ucp_mem_map_params_t     mmap_params;
   size_t                   rkey_buf_size;
   void                     *rkey_buf;
