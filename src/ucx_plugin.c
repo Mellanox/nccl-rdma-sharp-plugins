@@ -1026,6 +1026,28 @@ ncclResult_t nccl_ucx_close_listen(void *listen_comm) {
   return ncclSuccess;
 }
 
+ncclNet_v8_t ucxPlugin_v8 = {
+  .name = "UCX",
+  .init = nccl_ucx_init,
+  .devices = nccl_ucx_devices,
+  .getProperties = nccl_ucx_get_properties,
+  .listen = nccl_ucx_listen,
+  .connect = nccl_ucx_connect,
+  .accept = nccl_ucx_accept,
+  .regMr = nccl_ucx_regmr,
+  .regMrDmaBuf = nccl_ucx_regmr_dmabuf,
+  .deregMr = nccl_ucx_deregmr,
+  .isend = nccl_ucx_isend,
+  .irecv = nccl_ucx_irecv,
+  .iflush = nccl_ucx_iflush,
+  .test = nccl_ucx_test,
+  .closeSend = nccl_ucx_close_send,
+  .closeRecv = nccl_ucx_close_recv,
+  .closeListen = nccl_ucx_close_listen,
+  NULL /* getDeviceMr */,
+  NULL /* irecvConsumed */
+};
+
 ncclNet_v7_t ucxPlugin_v7 = {
   .name = "UCX",
   .init = nccl_ucx_init,
