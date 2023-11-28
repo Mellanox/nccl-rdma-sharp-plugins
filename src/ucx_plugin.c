@@ -176,6 +176,7 @@ typedef struct ucx_request {
 } ucx_request_t;
 
 static ucp_tag_t              worker_tags[MAX_IB_DEVS];
+static ucp_context_h          ucp_ctx[MAX_IB_DEVS];
 static struct nccl_ucx_worker *workers[MAX_IB_DEVS];
 static int worker_count = 0;
 
@@ -275,23 +276,28 @@ static ncclResult_t ucx_init_context(ucp_context_h *ctx, int dev) {
   char         ucx_dev_name[PATH_MAX];
   ncclResult_t result;
 
-  snprintf(ucx_dev_name, PATH_MAX, "%s:%d", ncclIbDevs[dev].devName, ncclIbDevs[dev].port);
-  UCXCHECK(ucp_config_read("NCCL", NULL, &config));
-  UCXCHECK(ucp_config_modify(config, "NET_DEVICES", ucx_dev_name));
+  if (ucp_ctx[dev] == NULL) {
+    snprintf(ucx_dev_name, PATH_MAX, "%s:%d", ncclIbDevs[dev].devName,
+             ncclIbDevs[dev].port);
+    UCXCHECK(ucp_config_read("NCCL", NULL, &config));
+    UCXCHECK(ucp_config_modify(config, "NET_DEVICES", ucx_dev_name));
 
-  if (ncclParamUCXCudaDisable()) {
-    result = ucx_config_no_cuda(config);
-    if (result != ncclSuccess) {
-      return result;
+    if (ncclParamUCXCudaDisable()) {
+      result = ucx_config_no_cuda(config);
+      if (result != ncclSuccess) {
+        return result;
+      }
     }
+
+    memset(&ucp_params, 0, sizeof(ucp_params));
+    ucp_params.field_mask = UCP_PARAM_FIELD_FEATURES;
+    ucp_params.features   = UCP_FEATURE_TAG | UCP_FEATURE_RMA;
+
+    UCXCHECK(ucp_init(&ucp_params, config, &ucp_ctx[dev]));
+    ucp_config_release(config);
   }
 
-  memset(&ucp_params, 0, sizeof(ucp_params));
-  ucp_params.field_mask = UCP_PARAM_FIELD_FEATURES;
-  ucp_params.features   = UCP_FEATURE_TAG | UCP_FEATURE_RMA;
-
-  UCXCHECK(ucp_init(&ucp_params, config, ctx));
-  ucp_config_release(config);
+  *ctx = ucp_ctx[dev];
 
   return ncclSuccess;
 }
@@ -430,12 +436,14 @@ static ncclResult_t nccl_ucx_free_worker(nccl_ucx_worker_t *ucx_worker) {
         free(cur);
       }
       ucp_worker_destroy(ucx_worker->worker);
-      ucp_cleanup(ucx_worker->ctx);
-
       free(ucx_worker);
     }
 
     workers[dev] = NULL;
+    if (ucp_ctx[dev]) {
+      ucp_cleanup(ucp_ctx[dev]);
+      ucp_ctx[dev] = NULL;
+    }
   }
 
   return ncclSuccess;
