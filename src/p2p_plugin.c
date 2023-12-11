@@ -15,14 +15,17 @@
 #include "p2p_plugin.h"
 
 #ifdef HAVE_UCX_PLUGIN
+extern ncclNet_v8_t ucxPlugin_v8;
 extern ncclNet_v7_t ucxPlugin_v7;
 extern ncclNet_v6_t ucxPlugin_v6;
 extern ncclNet_v5_t ucxPlugin_v5;
+extern ncclNet_v8_t ucxRmaPlugin_v8;
 extern ncclNet_v7_t ucxRmaPlugin_v7;
 extern ncclNet_v6_t ucxRmaPlugin_v6;
 extern ncclNet_v5_t ucxRmaPlugin_v5;
 #endif
 
+extern ncclNet_v8_t ibPlugin_v8;
 extern ncclNet_v7_t ibPlugin_v7;
 extern ncclNet_v6_t ibPlugin_v6;
 extern ncclNet_v5_t ibPlugin_v5;
@@ -40,9 +43,15 @@ extern int ncclIbRelaxedOrderingEnabled;
 NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
 NCCL_PARAM(IbAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
 
+ncclResult_t pluginInit_v8(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v7(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v6(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v5(ncclDebugLogger_t logFunction);
+
+ncclNet_v8_t ncclNetPlugin_v8 = {
+  "NCCL RDMA Plugin v8",
+  pluginInit_v8,
+};
 
 ncclNet_v7_t ncclNetPlugin_v7 = {
   "NCCL RDMA Plugin v7",
@@ -85,23 +94,33 @@ static void pluginSetup()
   switch (p2p_plugin) {
 #ifdef HAVE_UCX_PLUGIN
     case NCCL_P2P_UCX:
+      ncclNetPlugin_v8 = ucxPlugin_v8;
       ncclNetPlugin_v7 = ucxPlugin_v7;
       ncclNetPlugin_v6 = ucxPlugin_v6;
       ncclNetPlugin_v5 = ucxPlugin_v5;
       break;
     case NCCL_P2P_UCX_RMA:
+      ncclNetPlugin_v8 = ucxRmaPlugin_v8;
       ncclNetPlugin_v7 = ucxRmaPlugin_v7;
       ncclNetPlugin_v6 = ucxRmaPlugin_v6;
       ncclNetPlugin_v5 = ucxRmaPlugin_v5;
       break;
 #endif
     default:
+      ncclNetPlugin_v8 = ibPlugin_v8;
       ncclNetPlugin_v7 = ibPlugin_v7;
       ncclNetPlugin_v6 = ibPlugin_v6;
       ncclNetPlugin_v5 = ibPlugin_v5;
       break;
   }
 
+}
+
+ncclResult_t pluginInit_v8(ncclDebugLogger_t logFunction) {
+  pluginLogFunction = logFunction;
+  pluginSetup();
+  INFO(NCCL_INIT|NCCL_NET, "P2P plugin %s", ncclNetPlugin_v8.name);
+  return ncclNetPlugin_v8.init(logFunction);
 }
 
 ncclResult_t pluginInit_v7(ncclDebugLogger_t logFunction) {
@@ -176,6 +195,7 @@ ncclResult_t nccl_p2p_ib_get_properties(nccl_ib_dev_t *devs, int dev, ncclNetPro
     props->ptrSupport |= NCCL_PTR_CUDA; // GDR support via nv_peermem
     INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (nvidia-peermem) enabled for HCA %d '%s", dev, devs[dev].devName);
   }
+  props->regIsGlobal = 1;
   if (p2p_plugin == NCCL_P2P_IB && nccl_p2p_dmabuf_support(dev) == ncclSuccess) {
     props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
     INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (DMABUF) enabled for HCA %d '%s", dev, devs[dev].devName);

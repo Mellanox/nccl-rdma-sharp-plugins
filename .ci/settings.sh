@@ -20,7 +20,7 @@ fi
 # TODO remove use HPC-X which is already inside the image
 
 #module load /hpc/local/etc/modulefiles/dev/cuda-latest
-HPCX_UBUNTU_INSTALL_DIR=${HPCX_UBUNTU_INSTALL_DIR:-/hpc/noarch/HPCX/unpacked/hpcx-v2.13-gcc-MLNX_OFED_LINUX-5-ubuntu20.04-cuda11-gdrcopy2-nccl2.12-x86_64/}
+HPCX_UBUNTU_INSTALL_DIR=${HPCX_UBUNTU_INSTALL_DIR:-/hpc/noarch/HPCX/unpacked/hpcx-v2.17-gcc-mlnx_ofed-ubuntu20.04-cuda12-x86_64/}
 module load "${HPCX_UBUNTU_INSTALL_DIR}"/modulefiles/hpcx-ompi
 # . "${HPCX_UBUNTU_INSTALL_DIR}/hpcx-init.sh"
 # hpcx_load

@@ -78,6 +78,25 @@ ncclResult_t ncclIbGetProperties(int dev, ncclNetProperties_t* props)
   return nccl_p2p_ib_get_properties(ncclIbDevs, dev, props);
 }
 
+ncclResult_t ncclIbGetProperties_v7(int dev, ncclNetProperties_v7_t* props_v7)
+{
+  ncclNetProperties_t props;
+  ncclResult_t ret = nccl_p2p_ib_get_properties(ncclIbDevs, dev, &props);
+  if (ret != ncclSuccess) return ret;
+  props_v7->name = props.name;
+  props_v7->pciPath = props.pciPath;
+  props_v7->guid = props.guid;
+  props_v7->ptrSupport = props.ptrSupport;
+  props_v7->speed = props.speed;
+  props_v7->latency = props.latency;
+  props_v7->port = props.port;
+  props_v7->maxComms = props.maxComms;
+  props_v7->maxRecvs = props.maxRecvs;
+  props_v7->netDeviceType = props.netDeviceType;
+  props_v7->netDeviceVersion = props.netDeviceVersion;
+  return ncclSuccess;
+}
+
 ncclResult_t ncclIbGetProperties_v6(int dev, ncclNetProperties_v6_t* props_v6)
 {
   ncclNetProperties_t props;
@@ -693,7 +712,10 @@ returning:
   return res;
 }
 
-ncclResult_t ncclIbRegMr(void* comm, void* data, int size, int type, void** mhandle) {
+ncclResult_t ncclIbRegMr(void* comm, void* data, size_t size, int type, void** mhandle) {
+  return ncclIbRegMrDmaBuf(comm, data, size, type, 0ULL, -1, mhandle);
+}
+ncclResult_t ncclIbRegMr_v7(void* comm, void* data, int size, int type, void** mhandle) {
   return ncclIbRegMrDmaBuf(comm, data, (size_t)size, type, 0ULL, -1, mhandle);
 }
 
@@ -1124,8 +1146,8 @@ ncclResult_t ncclIbCloseListen(void* listenComm) {
   return ncclSuccess;
 }
 
-const ncclNet_v7_t ibPlugin_v7 = {
-  .name = "IBext_v7",
+const ncclNet_v8_t ibPlugin_v8 = {
+  .name = "IBext_v8",
   .init = ncclIbInit,
   .devices = ncclIbDevices,
   .getProperties = ncclIbGetProperties,
@@ -1133,6 +1155,28 @@ const ncclNet_v7_t ibPlugin_v7 = {
   .connect = ncclIbConnect,
   .accept = ncclIbAccept,
   .regMr = ncclIbRegMr,
+  .regMrDmaBuf = ncclIbRegMrDmaBuf,
+  .deregMr = ncclIbDeregMr,
+  .isend = ncclIbIsend,
+  .irecv = ncclIbIrecv,
+  .iflush = ncclIbIflush,
+  .test = ncclIbTest,
+  .closeSend = ncclIbCloseSend,
+  .closeRecv = ncclIbCloseRecv,
+  .closeListen = ncclIbCloseListen,
+  NULL /* getDeviceMr */,
+  NULL /* irecvConsumed */
+};
+
+const ncclNet_v7_t ibPlugin_v7 = {
+  .name = "IBext_v7",
+  .init = ncclIbInit,
+  .devices = ncclIbDevices,
+  .getProperties = ncclIbGetProperties_v7,
+  .listen = ncclIbListen,
+  .connect = ncclIbConnect,
+  .accept = ncclIbAccept,
+  .regMr = ncclIbRegMr_v7,
   .regMrDmaBuf = ncclIbRegMrDmaBuf,
   .deregMr = ncclIbDeregMr,
   .isend = ncclIbIsend,
@@ -1154,7 +1198,7 @@ const ncclNet_v6_t ibPlugin_v6 = {
   .listen = ncclIbListen,
   .connect = ncclIbConnect_v6,
   .accept = ncclIbAccept_v6,
-  .regMr = ncclIbRegMr,
+  .regMr = ncclIbRegMr_v7,
   .regMrDmaBuf = ncclIbRegMrDmaBuf,
   .deregMr = ncclIbDeregMr,
   .isend = ncclIbIsend,
@@ -1174,7 +1218,7 @@ const ncclNet_v5_t ibPlugin_v5 = {
   .listen = ncclIbListen,
   .connect = ncclIbConnect_v6,
   .accept = ncclIbAccept_v6,
-  .regMr = ncclIbRegMr,
+  .regMr = ncclIbRegMr_v7,
   .deregMr = ncclIbDeregMr,
   .isend = ncclIbIsend,
   .irecv = ncclIbIrecv,
