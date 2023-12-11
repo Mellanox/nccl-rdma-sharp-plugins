@@ -80,6 +80,24 @@ ncclResult_t nccl_ucx_rma_get_properties(int dev, ncclNetProperties_t* props)
   return nccl_p2p_ib_get_properties(ncclIbDevs, dev, props);
 }
 
+ncclResult_t nccl_ucx_rma_get_properties_v7(int dev, ncclNetProperties_v7_t* props_v7)
+{
+  ncclNetProperties_t props;
+  ncclResult_t ret = nccl_ucx_rma_get_properties(dev, &props);
+  if (ret != ncclSuccess) return ret;
+  props_v7->name = props.name;
+  props_v7->pciPath = props.pciPath;
+  props_v7->guid = props.guid;
+  props_v7->ptrSupport = props.ptrSupport;
+  props_v7->speed = props.speed;
+  props_v7->latency = props.latency;
+  props_v7->port = props.port;
+  props_v7->maxComms = props.maxComms;
+  props_v7->maxRecvs = props.maxRecvs;
+  props_v7->netDeviceType = props.netDeviceType;
+  props_v7->netDeviceVersion = props.netDeviceVersion;
+   return ncclSuccess;
+}
 ncclResult_t nccl_ucx_rma_get_properties_v6(int dev, ncclNetProperties_v6_t* props_v6)
 {
   ncclNetProperties_t props;
@@ -94,7 +112,6 @@ ncclResult_t nccl_ucx_rma_get_properties_v6(int dev, ncclNetProperties_v6_t* pro
   props_v6->port = props.port;
   props_v6->maxComms = props.maxComms;
   props_v6->maxRecvs = props.maxRecvs;
-
   return ncclSuccess;
 }
 
@@ -624,7 +641,7 @@ ncclResult_t nccl_ucx_rma_accept_v6(void *listen_comm, void **recv_comm)
 }
 
 #define REG_ALIGN (4096)
-ncclResult_t nccl_ucx_rma_regmr(void* comm, void* data, int size, int type,
+ncclResult_t nccl_ucx_rma_regmr(void* comm, void* data, size_t size, int type,
                                 void** mhandle)
 {
   nccl_ucx_rma_ctx_t   *ctx = (nccl_ucx_rma_ctx_t*)comm;
@@ -682,6 +699,12 @@ ncclResult_t nccl_ucx_rma_regmr(void* comm, void* data, int size, int type,
   ucp_rkey_buffer_release(rkey_buf);
 
   return ncclSuccess;
+}
+
+ncclResult_t nccl_ucx_rma_regmr_v7(void* comm, void* data, int size, int type,
+                                   void** mhandle)
+{
+	return nccl_ucx_rma_regmr(comm, data, (size_t)size, type, mhandle);
 }
 
 ncclResult_t nccl_ucx_rma_regmr_dmabuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
@@ -1157,7 +1180,7 @@ ncclResult_t nccl_ucx_rma_close_listen(void *listen_comm)
   return ncclSuccess;
 }
 
-ncclNet_v7_t ucxRmaPlugin_v7 = {
+ncclNet_v8_t ucxRmaPlugin_v8 = {
   .name = "UCX-RMA",
   .init = nccl_ucx_rma_init,
   .devices = nccl_ucx_rma_devices,
@@ -1177,7 +1200,28 @@ ncclNet_v7_t ucxRmaPlugin_v7 = {
   .closeListen = nccl_ucx_rma_close_listen,
   NULL /* getDeviceMr */,
   NULL /* irecvConsumed */
+};
 
+ncclNet_v7_t ucxRmaPlugin_v7 = {
+  .name = "UCX-RMA",
+  .init = nccl_ucx_rma_init,
+  .devices = nccl_ucx_rma_devices,
+  .getProperties = nccl_ucx_rma_get_properties_v7,
+  .listen = nccl_ucx_rma_listen,
+  .connect = nccl_ucx_rma_connect,
+  .accept = nccl_ucx_rma_accept,
+  .regMr = nccl_ucx_rma_regmr_v7,
+  .regMrDmaBuf = nccl_ucx_rma_regmr_dmabuf,
+  .deregMr = nccl_ucx_rma_deregmr,
+  .isend = nccl_ucx_rma_isend,
+  .irecv = nccl_ucx_rma_irecv,
+  .iflush = nccl_ucx_rma_iflush,
+  .test = nccl_ucx_rma_test,
+  .closeSend = nccl_ucx_rma_close_send,
+  .closeRecv = nccl_ucx_rma_close_recv,
+  .closeListen = nccl_ucx_rma_close_listen,
+  NULL /* getDeviceMr */,
+  NULL /* irecvConsumed */
 };
 
 ncclNet_v6_t ucxRmaPlugin_v6 = {
@@ -1188,7 +1232,7 @@ ncclNet_v6_t ucxRmaPlugin_v6 = {
   .listen = nccl_ucx_rma_listen,
   .connect = nccl_ucx_rma_connect_v6,
   .accept = nccl_ucx_rma_accept_v6,
-  .regMr = nccl_ucx_rma_regmr,
+  .regMr = nccl_ucx_rma_regmr_v7,
   .regMrDmaBuf = nccl_ucx_rma_regmr_dmabuf,
   .deregMr = nccl_ucx_rma_deregmr,
   .isend = nccl_ucx_rma_isend,
@@ -1208,7 +1252,7 @@ ncclNet_v5_t ucxRmaPlugin_v5 = {
   .listen = nccl_ucx_rma_listen,
   .connect = nccl_ucx_rma_connect_v6,
   .accept = nccl_ucx_rma_accept_v6,
-  .regMr = nccl_ucx_rma_regmr,
+  .regMr = nccl_ucx_rma_regmr_v7,
   .deregMr = nccl_ucx_rma_deregmr,
   .isend = nccl_ucx_rma_isend,
   .irecv = nccl_ucx_rma_irecv,

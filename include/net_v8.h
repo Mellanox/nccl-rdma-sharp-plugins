@@ -2,9 +2,8 @@
  * Copyright (c) 2017-2023, NVIDIA CORPORATION. All rights reserved.
  */
 
-#ifndef NCCL_NET_V7_H_
-#define NCCL_NET_V7_H_
-
+#ifndef NCCL_NET_V8_H_
+#define NCCL_NET_V8_H_
 #include "net_device.h"
 
 typedef struct {
@@ -13,6 +12,7 @@ typedef struct {
   uint64_t guid;                   // Unique identifier for the NIC chip. Important for
                                    // cards with multiple PCI functions (Physical or virtual).
   int ptrSupport;                  // [NCCL_PTR_HOST|NCCL_PTR_CUDA|NCCL_PTR_DMABUF]
+  int regIsGlobal;                 // regMr is not tied to a particular comm
   int speed;                       // Port speed in Mbps.
   int port;                        // Port number.
   float latency;                   // Network latency
@@ -20,7 +20,9 @@ typedef struct {
   int maxRecvs;                    // Maximum number of grouped receives.
   ncclNetDeviceType netDeviceType; // Network offload type
   int netDeviceVersion;            // Version number for network offload
-} ncclNetProperties_v7_t;
+} ncclNetProperties_v8_t;
+
+typedef ncclNetProperties_v8_t ncclNetProperties_t;
 
 typedef struct {
   // Name of the network (mainly for logs)
@@ -30,7 +32,7 @@ typedef struct {
   // Return the number of adapters.
   ncclResult_t (*devices)(int* ndev);
   // Get various device properties.
-  ncclResult_t (*getProperties)(int dev, ncclNetProperties_v7_t* props);
+  ncclResult_t (*getProperties)(int dev, ncclNetProperties_v8_t* props);
   // Create a receiving object and provide a handle to connect to it. The
   // handle can be up to NCCL_NET_HANDLE_MAXSIZE bytes and will be exchanged
   // between ranks to create a connection.
@@ -40,16 +42,16 @@ typedef struct {
   // should return successfully with sendComm == NULL with the expectation that
   // it will be called again until sendComm != NULL.
   // If *sendDevComm points to a valid object, then NCCL is requesting device offload for this connection
-  ncclResult_t (*connect)(int dev, void* handle, void** sendComm, ncclNetDeviceHandle_v7_t** sendDevComm);
+  ncclResult_t (*connect)(int dev, void* handle, void** sendComm, ncclNetDeviceHandle_v8_t** sendDevComm);
   // Finalize connection establishment after remote peer has called connect.
   // This call must not block for the connection to be established, and instead
   // should return successfully with recvComm == NULL with the expectation that
   // it will be called again until recvComm != NULL.
   // If *recvDevComm points to a valid object, then NCCL is requesting device offload for this connection
-  ncclResult_t (*accept)(void* listenComm, void** recvComm, ncclNetDeviceHandle_v7_t** recvDevComm);
+  ncclResult_t (*accept)(void* listenComm, void** recvComm, ncclNetDeviceHandle_v8_t** recvDevComm);
   // Register/Deregister memory. Comm can be either a sendComm or a recvComm.
   // Type is either NCCL_PTR_HOST or NCCL_PTR_CUDA.
-  ncclResult_t (*regMr)(void* comm, void* data, int size, int type, void** mhandle);
+  ncclResult_t (*regMr)(void* comm, void* data, size_t size, int type, void** mhandle);
   /* DMA-BUF support */
   ncclResult_t (*regMrDmaBuf)(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);
   ncclResult_t (*deregMr)(void* comm, void* mhandle);
@@ -75,9 +77,15 @@ typedef struct {
 
   // Notify the plugin that a recv has completed by the device
   ncclResult_t (*irecvConsumed)(void* recvComm, int n, void* request);
-} ncclNet_v7_t;
+} ncclNet_v8_t;
 
-// v7 struct for backwards compatibility
+
+typedef struct {
+  void* mhandle;
+  void* address;
+  uint32_t size;
+} ncclNetSGE_v8_t;
+
 typedef struct {
   // Name of the collective network (mainly for logs)
   const char* name;
@@ -87,7 +95,7 @@ typedef struct {
   // If ndev returns 0, all other functions might be set to NULL.
   ncclResult_t (*devices)(int* ndev);
   // Get various device properties.
-  ncclResult_t (*getProperties)(int dev, ncclNetProperties_v7_t* props);
+  ncclResult_t (*getProperties)(int dev, ncclNetProperties_v8_t* props);
   // Create a receiving object and provide a handle to connect to it. The
   // handle can be up to NCCL_NET_HANDLE_MAXSIZE bytes and will be exchanged
   // between ranks to create connections.
@@ -99,7 +107,7 @@ typedef struct {
   // 1 for supported, 0 otherwise.
   ncclResult_t (*reduceSupport)(ncclDataType_t dataType, ncclRedOp_t redOp, int* supported);
   // Register/Deregister memory. Type is either NCCL_PTR_HOST or NCCL_PTR_CUDA.
-  ncclResult_t (*regMr)(void* collComm, void* data, int size, int type, void** mhandle);
+  ncclResult_t (*regMr)(void* collComm, void* data, size_t size, int type, void** mhandle);
   /* DMA-BUF support */
   ncclResult_t (*regMrDmaBuf)(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);
   ncclResult_t (*deregMr)(void* collComm, void* mhandle);
@@ -107,6 +115,13 @@ typedef struct {
   // May return request == NULL if the call cannot be performed (or would block).
   ncclResult_t (*iallreduce)(void* collComm, void* sendData, void* recvData, int count,
       ncclDataType_t dataType, ncclRedOp_t redOp, void* sendMhandle, void* recvMhandle, void** request);
+  ncclResult_t (*iallgather)(void* collComm, void* sendData, int nRecvParts, ncclNetSGE_v8_t* recvParts,
+                             size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
+                             void* sendMhandle, void** request);
+  ncclResult_t (*ireducescatter)(void* collComm, int nSendParts, ncclNetSGE_v8_t* sendParts, void* recvData,
+                                 size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
+                                 ncclDataType_t dataType, ncclRedOp_t redOp,
+                                 void* recvMhandle, void** request);
   // Perform a flush/fence to make sure all data received with NCCL_PTR_CUDA is
   // visible to the GPU
   ncclResult_t (*iflush)(void* collComm, void* data, int size, void* mhandle, void** request);
@@ -116,6 +131,7 @@ typedef struct {
   // Close and free collective comm objects
   ncclResult_t (*closeColl)(void* collComm);
   ncclResult_t (*closeListen)(void* listenComm);
-} ncclCollNet_v7_t;
+} ncclCollNet_v8_t;
+
 
 #endif // end include guard
