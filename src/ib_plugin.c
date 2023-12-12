@@ -247,7 +247,7 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
   return nccl_p2p_ib_init(&ncclNIbDevs, ncclIbDevs, ncclIbIfName, &ncclIbIfAddr, &ncclIbAsyncThread, logFunction);
 }
 
-NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
+NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 2);
 
 ncclResult_t ncclIbInitVerbs(int dev, struct ibv_context* ctx, struct ncclIbVerbs* verbs) {
   verbs->dev = dev;
@@ -746,7 +746,7 @@ returning:
   return res;
 }
 
-NCCL_PARAM(IbSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 1);
+NCCL_PARAM(IbSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
 
 ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   struct ncclIbRequest** reqs = comm->fifoReqs[slot];
