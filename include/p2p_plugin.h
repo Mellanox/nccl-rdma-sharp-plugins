@@ -34,7 +34,7 @@ typedef enum nccl_p2p_plugin {
 
 struct ncclIbMr {
   uintptr_t addr;
-  int pages;
+  size_t pages;
   int refs;
   struct ibv_mr *mr;
 };
@@ -59,7 +59,7 @@ struct ncclIbRequest {
       int offset;
     } send;
     struct {
-      int sizes[NCCL_NET_IB_MAX_RECVS];
+      int* sizes;
     } recv;
   };
 };
