@@ -260,7 +260,7 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
   return nccl_p2p_ib_init(&ncclNIbDevs, ncclIbDevs, ncclIbIfName, &ncclIbIfAddr, &ncclIbAsyncThread, logFunction);
 }
 
-NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 2);
+NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
 
 ncclResult_t ncclIbInitVerbs(int dev, struct ibv_context* ctx, struct ncclIbVerbs* verbs) {
   verbs->dev = dev;
