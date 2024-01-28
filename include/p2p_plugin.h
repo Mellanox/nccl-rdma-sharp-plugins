@@ -123,6 +123,8 @@ int nccl_p2p_ib_speed(int speed);
 
 int64_t ncclParamSharpMaxComms();
 
+int64_t ncclParamIbMergeVfs();
+
 int ncclIbRelaxedOrderingCapable(void);
 
 nccl_p2p_plugin_t nccl_p2p_get_plugin_type();
