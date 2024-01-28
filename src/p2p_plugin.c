@@ -385,7 +385,7 @@ ncclResult_t nccl_p2p_ib_pci_path(nccl_ib_dev_t *devs, int num_devs, char* dev_n
     // Merge multi-port NICs into the same PCI device
     p[strlen(p)-1] = '0';
     // Also merge virtual functions (VF) into the same device
-    p[strlen(p)-3] = '0';
+    if (ncclParamIbMergeVfs()) p[strlen(p)-3] = p[strlen(p)-4] = '0';
     // And keep the real port aside (the ibv port is always 1 on recent cards)
     *real_port = 0;
     for (int d=0; d<num_devs; d++) {
