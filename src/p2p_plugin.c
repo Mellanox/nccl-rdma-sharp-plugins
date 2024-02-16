@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2016-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -32,6 +32,7 @@ extern ncclNet_v5_t ibPlugin_v5;
 pthread_mutex_t nccl_p2p_lock = PTHREAD_MUTEX_INITIALIZER;
 
 ncclDebugLogger_t pluginLogFunction;
+static int ncclNMergedIbDevs = -1;
 
 #ifdef HAVE_SHARP_PLUGIN
 extern int ncclNSharpDevs;
@@ -144,7 +145,7 @@ ncclResult_t pluginInit_v5(ncclDebugLogger_t logFunction) {
   return ncclNetPlugin_v5.init(logFunction);
 }
 
-ncclResult_t nccl_p2p_gdr_support(int dev)
+ncclResult_t nccl_p2p_gdr_support()
 {
   static int module_loaded = -1;
 
@@ -169,13 +170,20 @@ ncclResult_t nccl_p2p_dmabuf_support(int dev) {
     ncclResult_t res;
     struct ibv_pd* pd;
     struct ibv_context* ctx;
-    ctx = ncclIbDevs[dev].context;
-    NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
-    // Test kernel DMA-BUF support with a dummy call (fd=-1)
-    (void) wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL/*offset*/, 0ULL/*len*/, 0ULL/*iova*/, -1/*fd*/, 0/*flags*/);
-    // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
-    dmaBufSupported = (errno != EOPNOTSUPP && errno != EPROTONOSUPPORT) ? 1 : 0;
-    NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
+    struct ncclIbMergedDev* mergedDev = ncclIbMergedDevs + dev;
+
+    // Test each dev
+    for (int i = 0; i < mergedDev->ndevs; i++) {
+      int ibDev = mergedDev->devs[i];
+      ctx = ncclIbDevs[ibDev].context;
+      NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
+      // Test kernel DMA-BUF support with a dummy call (fd=-1)
+      (void) wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL/*offset*/, 0ULL/*len*/, 0ULL/*iova*/, -1/*fd*/, 0/*flags*/);
+      // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
+      dmaBufSupported = (errno != EOPNOTSUPP && errno != EPROTONOSUPPORT) ? 1 : 0;
+      NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
+    }
+
   }
   if (dmaBufSupported == 0) return ncclSystemError;
   return ncclSuccess;
@@ -185,13 +193,19 @@ failure:
 }
 
 
-ncclResult_t nccl_p2p_ib_get_properties(nccl_ib_dev_t *devs, int dev, ncclNetProperties_t* props)
+ncclResult_t nccl_p2p_ib_get_properties(ncclIbDev *devs, int dev, ncclNetProperties_t* props)
 {
-  props->name         = devs[dev].devName;
-  props->pciPath      = devs[dev].pciPath;
-  props->guid         = devs[dev].guid;
+  struct ncclIbMergedDev* mergedDev = ncclIbMergedDevs+dev;
+  props->name = mergedDev->devName;
+  props->speed = mergedDev->speed;
+
+  // Take the rest of the properties from an arbitrary sub-device (should be the same)
+  struct ncclIbDev* ibDev = ncclIbDevs + mergedDev->devs[0];
+  props->pciPath = ibDev->pciPath;
+  props->guid = ibDev->guid;
+
   props->ptrSupport   = NCCL_PTR_HOST;
-  if (nccl_p2p_gdr_support(dev) == ncclSuccess) {
+  if (nccl_p2p_gdr_support() == ncclSuccess) {
     props->ptrSupport |= NCCL_PTR_CUDA; // GDR support via nv_peermem
     INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (nvidia-peermem) enabled for HCA %d '%s", dev, devs[dev].devName);
   }
@@ -201,10 +215,10 @@ ncclResult_t nccl_p2p_ib_get_properties(nccl_ib_dev_t *devs, int dev, ncclNetPro
     INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (DMABUF) enabled for HCA %d '%s", dev, devs[dev].devName);
   }
 
-  props->speed        = devs[dev].speed;
   props->latency      = 0; // Not set
-  props->port         = devs[dev].port + devs[dev].realPort;
-  props->maxComms     = devs[dev].maxQp;
+  props->port = ibDev->portNum + ibDev->realPort;
+  props->maxComms = ibDev->maxQp;
+
   if (p2p_plugin == NCCL_P2P_IB || p2p_plugin == NCCL_P2P_UCX) {
     props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
   } else {
@@ -217,14 +231,14 @@ ncclResult_t nccl_p2p_ib_get_properties(nccl_ib_dev_t *devs, int dev, ncclNetPro
 }
 
 static void* ncclIbAsyncThreadMain(void* args) {
-  struct ibv_context* context = (struct ibv_context*)args;
+  struct ncclIbDev* dev = (struct ncclIbDev*)args;
   while (1) {
     struct ibv_async_event event;
-    if (ncclSuccess != wrap_ibv_get_async_event(context, &event)) { break; }
+    if (ncclSuccess != wrap_ibv_get_async_event(dev->context, &event)) { break; }
     char *str;
     if (ncclSuccess != wrap_ibv_event_type_str(&str, event.event_type)) { break; }
     if (event.event_type != IBV_EVENT_COMM_EST)
-      WARN("NET/IB : Got async event : %s", str);
+      WARN("NET/IB : %s:%d Got async event : %s", dev->devName, dev->portNum, str);
     if (ncclSuccess != wrap_ibv_ack_async_event(&event)) { break; }
   }
   return NULL;
@@ -240,7 +254,26 @@ int devSharpCompare(const void *a, const void *b)
   else { return 1; }
 }
 
-ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *ncclIbIfName, union ncclSocketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction)
+// Compare ncclIbDev[dev] to all stored mergedIbDevs
+int ncclIbFindMatchingDev(int dev) {
+  for (int i = 0; i < ncclNMergedIbDevs; i++) {
+    if (ncclIbMergedDevs[i].ndevs < NCCL_IB_MAX_DEVS_PER_NIC) {
+      int compareDev = ncclIbMergedDevs[i].devs[0];
+      if (strcmp(ncclIbDevs[dev].pciPath, ncclIbDevs[compareDev].pciPath) == 0 &&
+          (ncclIbDevs[dev].guid == ncclIbDevs[compareDev].guid) &&
+          (ncclIbDevs[dev].link == ncclIbDevs[compareDev].link)) {
+          TRACE(NCCL_NET, "NET/IB: Matched name1=%s pciPath1=%s guid1=0x%lx link1=%u name2=%s pciPath2=%s guid2=0x%lx link2=%u",
+            ncclIbDevs[dev].devName, ncclIbDevs[dev].pciPath, ncclIbDevs[dev].guid, ncclIbDevs[dev].link,
+            ncclIbDevs[compareDev].devName, ncclIbDevs[compareDev].pciPath, ncclIbDevs[compareDev].guid, ncclIbDevs[compareDev].link);
+          return i;
+      }
+    }
+  }
+
+  return ncclNMergedIbDevs;
+}
+
+ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIbIfName, union ncclSocketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction)
 {
   int ncclNIbDevs = *num_devs;
 
@@ -250,6 +283,7 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
     wrap_ibv_fork_init();
     if (ncclNIbDevs == -1) {
       ncclNIbDevs = 0;
+      ncclNMergedIbDevs = 0;
       ncclNSharpDevs = 0;
       if (ncclFindInterfaces(ncclIbIfName, ncclIbIfAddr, MAX_IF_NAME_SIZE, 1) != 1) {
         WARN("NET/IB : No IP interface found.");
@@ -283,10 +317,10 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
           if (ncclSuccess != wrap_ibv_close_device(context)) { return ncclInternalError; }
           continue;
         }
-        for (int port = 1; port <= devAttr.phys_port_cnt; port++) {
+        for (int port_num = 1; port_num <= devAttr.phys_port_cnt; port_num++) {
           struct ibv_port_attr portAttr;
-          if (ncclSuccess != wrap_ibv_query_port(context, port, &portAttr)) {
-            WARN("NET/IB : Unable to query port %d", port);
+          if (ncclSuccess != wrap_ibv_query_port(context, port_num, &portAttr)) {
+            WARN("NET/IB : Unable to query port_num %d", port_num);
             continue;
           }
           if (portAttr.state != IBV_PORT_ACTIVE) continue;
@@ -294,15 +328,13 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
               && portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
 
           // check against user specified HCAs/ports
-          if (! (matchIfList(devices[d]->name, port, userIfs, nUserIfs, searchExact) ^ searchNot)) {
+          if (! (matchIfList(devices[d]->name, port_num, userIfs, nUserIfs, searchExact) ^ searchNot)) {
             continue;
           }
-          TRACE(NCCL_INIT|NCCL_NET,"NET/IB: [%d] %s:%d/%s ", d, devices[d]->name, port,
-              portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
           pthread_mutex_init(&ncclIbDevs[ncclNIbDevs].lock, NULL);
           ncclIbDevs[ncclNIbDevs].device = d;
           ncclIbDevs[ncclNIbDevs].guid = devAttr.sys_image_guid;
-          ncclIbDevs[ncclNIbDevs].port = port;
+          ncclIbDevs[ncclNIbDevs].portNum = port_num;
           ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
           ncclIbDevs[ncclNIbDevs].speed = nccl_p2p_ib_speed(portAttr.active_speed) * nccl_p2p_ib_width(portAttr.active_width);
           ncclIbDevs[ncclNIbDevs].context = context;
@@ -327,12 +359,37 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
             ncclIbDevs[ncclNIbDevs].maxQp = ncclParamSharpMaxComms();
             ncclNSharpDevs++;
           }
-
+          TRACE(NCCL_NET,"NET/IB: [%d] %s:%s:%d/%s speed=%d context=%p pciPath=%s ar=%d", d, devices[d]->name, devices[d]->dev_name, ncclIbDevs[ncclNIbDevs].portNum,
+            portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE", ncclIbDevs[ncclNIbDevs].speed, context, ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar);
           if (ncclIbAsyncThread != NULL) {
-            pthread_create(ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, context);
+            pthread_create(ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs);
             ncclSetThreadName(*ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
             pthread_detach(*ncclIbAsyncThread); // will not be pthread_join()'d
           }
+
+          int mergedDev = ncclNMergedIbDevs;
+          if (ncclParamIbMergeNics()) {
+            mergedDev = ncclIbFindMatchingDev(ncclNIbDevs);
+          }
+
+          // No matching dev found, create new mergedDev entry (it's okay if there's only one dev inside)
+          if (mergedDev == ncclNMergedIbDevs) {
+            // Set ndevs to 1, assign first ibDevN to the current IB device
+            ncclIbMergedDevs[mergedDev].ndevs = 1;
+            ncclIbMergedDevs[mergedDev].devs[0] = ncclNIbDevs;
+            ncclNMergedIbDevs++;
+            strncpy(ncclIbMergedDevs[mergedDev].devName, ncclIbDevs[ncclNIbDevs].devName, MAXNAMESIZE);
+          // Matching dev found, edit name
+          } else {
+            // Set next device in this array to the current IB device
+            int ndevs = ncclIbMergedDevs[mergedDev].ndevs;
+            ncclIbMergedDevs[mergedDev].devs[ndevs] = ncclNIbDevs;
+            ncclIbMergedDevs[mergedDev].ndevs++;
+            snprintf(ncclIbMergedDevs[mergedDev].devName + strlen(ncclIbMergedDevs[mergedDev].devName), MAXNAMESIZE+1, "+%s", ncclIbDevs[ncclNIbDevs].devName);
+          }
+
+          // Aggregate speed
+          ncclIbMergedDevs[mergedDev].speed += ncclIbDevs[ncclNIbDevs].speed;
           ncclNIbDevs++;
           nPorts++;
         }
@@ -348,33 +405,48 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, nccl_ib_dev_t *ncclIbDevs, char *nc
         qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), devSharpCompare);
       }
 
-      char line[1024];
+      char line[2048];
       line[0] = '\0';
       // Determine whether RELAXED_ORDERING is enabled and possible
       ncclIbRelaxedOrderingEnabled = ncclIbRelaxedOrderingCapable();
-      for (int d=0; d<ncclNIbDevs; d++) {
+      for (int d = 0; d < ncclNMergedIbDevs; d++) {
+        struct ncclIbMergedDev* mergedDev = ncclIbMergedDevs + d;
+        if (mergedDev->ndevs > 1) {
+          // Print out merged dev info
+          snprintf(line+strlen(line), 2047-strlen(line), " [%d]={", d);
+          for (int i = 0; i < mergedDev->ndevs; i++) {
+            int ibDev = mergedDev->devs[i];
+            snprintf(line+strlen(line), 2047-strlen(line), "[%d] %s:%d/%s%s", ibDev, ncclIbDevs[ibDev].devName,
+              ncclIbDevs[ibDev].portNum, ncclIbDevs[ibDev].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE",
+              // Insert comma to delineate
+              i == (mergedDev->ndevs - 1) ? "" : ", ");
+          }
+          snprintf(line+strlen(line), 2047-strlen(line), "}");
+        } else {
+          int ibDev = mergedDev->devs[0];
 #ifdef HAVE_SHARP_PLUGIN
-        snprintf(line+strlen(line), 1023-strlen(line), " [%d]%s:%d/%s%s", d, ncclIbDevs[d].devName,
-            ncclIbDevs[d].port, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE",
-            ncclIbDevs[d].isSharpDev ? "/SHARP" : "");
+          snprintf(line+strlen(line), 2047-strlen(line), " [%d]%s:%d/%s%s", ibDev, ncclIbDevs[ibDev].devName,
+            ncclIbDevs[ibDev].portNum, ncclIbDevs[ibDev].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE",
+            ncclIbDevs[ibDev].isSharpDev ? "/SHARP" : "");
 #else
-        snprintf(line+strlen(line), 1023-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
-            ncclIbDevs[d].port, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
+          snprintf(line+strlen(line), 2047-strlen(line), " [%d]%s:%d/%s", ibDev, ncclIbDevs[ibDev].devName,
+            ncclIbDevs[ibDev].portNum, ncclIbDevs[ibDev].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
 #endif
+        }
       }
-      line[1023] = '\0';
+      line[2047] = '\0';
       char addrline[SOCKET_NAME_MAXLEN+1];
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
            ncclIbIfName, ncclSocketToString(ncclIbIfAddr, addrline, 1));
     }
-    *num_devs = ncclNIbDevs;
+    *num_devs = ncclNMergedIbDevs;
     pthread_mutex_unlock(&nccl_p2p_lock);
   }
   return ncclSuccess;
 
 }
 
-ncclResult_t nccl_p2p_ib_pci_path(nccl_ib_dev_t *devs, int num_devs, char* dev_name, char** path, int* real_port)
+ncclResult_t nccl_p2p_ib_pci_path(ncclIbDev *devs, int num_devs, char* dev_name, char** path, int* real_port)
 {
   char device_path[PATH_MAX];
   snprintf(device_path, PATH_MAX, "/sys/class/infiniband/%s/device", dev_name);
@@ -432,3 +504,4 @@ nccl_p2p_plugin_t nccl_p2p_get_plugin_type()
 
 struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
 struct ncclIbDev userIbDevs[MAX_IB_DEVS];
+struct ncclIbMergedDev ncclIbMergedDevs[MAX_IB_DEVS];

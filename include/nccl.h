@@ -14,11 +14,11 @@
 #endif
 
 #define NCCL_MAJOR 2
-#define NCCL_MINOR 15
-#define NCCL_PATCH 1
+#define NCCL_MINOR 20
+#define NCCL_PATCH 3
 #define NCCL_SUFFIX ""
 
-#define NCCL_VERSION_CODE 21510
+#define NCCL_VERSION_CODE 22003
 #define NCCL_VERSION(X,Y,Z) (((X) <= 2 && (Y) <= 8) ? (X) * 1000 + (Y) * 100 + (Z) : (X) * 10000 + (Y) * 100 + (Z))
 
 #ifdef __cplusplus
@@ -42,15 +42,24 @@ typedef enum { ncclSuccess                 =  0,
                ncclInProgress              =  7,
                ncclNumResults              =  8 } ncclResult_t;
 
+#define NCCL_CONFIG_UNDEF_INT INT_MIN
+#define NCCL_CONFIG_UNDEF_PTR NULL
+#define NCCL_SPLIT_NOCOLOR -1
+
 /* Communicator configuration. Users can assign value to attributes to specify the
  * behavior of a communicator. */
-typedef struct ncclConfig_v21400 {
+typedef struct ncclConfig_v21700 {
   /* attributes that users should never touch. */
   size_t size;
   unsigned int magic;
   unsigned int version;
   /* attributes that users are able to customize. */
   int blocking;
+  int cgaClusterSize;
+  int minCTAs;
+  int maxCTAs;
+  const char *netName;
+  int splitShare;
 } ncclConfig_t;
 
 /* Config initializer must be assigned to initialize config structure when it is created.
@@ -59,8 +68,22 @@ typedef struct ncclConfig_v21400 {
   sizeof(ncclConfig_t), /* size */                                      \
   0xcafebeef,           /* magic */                                     \
   NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH), /* version */       \
-  1                     /* blocking */                                  \
+  NCCL_CONFIG_UNDEF_INT,                    /* blocking */              \
+  NCCL_CONFIG_UNDEF_INT,                    /* cgaClusterSize */        \
+  NCCL_CONFIG_UNDEF_INT,                    /* minCTAs */               \
+  NCCL_CONFIG_UNDEF_INT,                    /* maxCTAs */               \
+  NCCL_CONFIG_UNDEF_PTR,                    /* netName */               \
+  NCCL_CONFIG_UNDEF_INT                     /* splitShare */            \
 }
+
+/* NCCL malloc and free function for all types of NCCL optimizations
+ * (e.g. user buffer registration). The actual allocated size might
+ * be larger than requested due to granularity requirement. */
+ncclResult_t  ncclMemAlloc(void** ptr, size_t size);
+ncclResult_t pncclMemAlloc(void** ptr, size_t size);
+
+ncclResult_t  ncclMemFree(void *ptr);
+ncclResult_t pncclMemFree(void *ptr);
 
 /* Return the NCCL_VERSION_CODE of the NCCL library in the supplied integer.
  * This integer is coded with the MAJOR, MINOR and PATCH level of the
@@ -119,6 +142,10 @@ ncclResult_t pncclCommAbort(ncclComm_t comm);
 const char*  ncclGetErrorString(ncclResult_t result);
 const char* pncclGetErrorString(ncclResult_t result);
 
+/* Returns a human-readable message of the last error that occurred. */
+ const char*  ncclGetLastError(ncclComm_t comm);
+ const char* pncclGetLastError(ncclComm_t comm);
+
 /* Checks whether the comm has encountered any asynchronous errors */
 ncclResult_t  ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
 ncclResult_t pncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
@@ -134,6 +161,16 @@ ncclResult_t pncclCommCuDevice(const ncclComm_t comm, int* device);
 /* Returns the user-ordered "rank" associated with the communicator. */
 ncclResult_t  ncclCommUserRank(const ncclComm_t comm, int* rank);
 ncclResult_t pncclCommUserRank(const ncclComm_t comm, int* rank);
+
+
+/* Register CUDA buffer for zero-copy operation */
+ncclResult_t  ncclCommRegister(const ncclComm_t comm, void* buff, size_t size, void** handle);
+ncclResult_t pncclCommRegister(const ncclComm_t comm, void* buff, size_t size, void** handle);
+
+/* Deregister CUDA buffer */
+ncclResult_t  ncclCommDeregister(const ncclComm_t comm, void* handle);
+ncclResult_t pncclCommDeregister(const ncclComm_t comm, void* handle);
+
 
 /* Reduction operation selector */
 typedef enum { ncclNumOps_dummy = 5 } ncclRedOp_dummy_t;

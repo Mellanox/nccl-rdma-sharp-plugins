@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015-2018, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2015-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -24,10 +24,24 @@
   } \
   return ncclSuccess;
 
+#define IBV_INT_CHECK_RET_ERRNO_OPTIONAL(call, success_retval, name, supported) \
+  int ret = call; \
+  if (ret == ENOTSUP || ret == EOPNOTSUPP) { \
+    INFO(NCCL_NET, "Call to " name " failed with error %s errno %d", strerror(ret), ret); \
+    *supported = 0; \
+    return ncclSuccess; \
+  } else if (ret != success_retval) { \
+    WARN("Call to " name " failed with error %s errno %d", strerror(ret), ret); \
+    *supported = 1; \
+    return ncclSystemError; \
+  } \
+  *supported = 1; \
+  return ncclSuccess;
+
 #define IBV_INT_CHECK_RET_ERRNO(call, success_retval, name) \
   int ret = call; \
   if (ret != success_retval) { \
-    WARN("Call to " name " failed with error %s", strerror(ret)); \
+    WARN("Call to " name " failed with error %s errno %d", strerror(ret), ret); \
     return ncclSystemError; \
   } \
   return ncclSuccess;
@@ -167,6 +181,26 @@ ncclResult_t wrap_ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struc
 ncclResult_t wrap_ibv_post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr) {
   IBV_INT_CHECK_RET_ERRNO(qp->context->ops.post_recv(qp, wr, bad_wr), 0, "ibv_post_recv");
   return ncclSuccess;
+}
+
+ncclResult_t wrap_ibv_query_ece(struct ibv_qp *qp, struct ibv_ece *ece, int* supported) { /*returns 0 on success, or the value of errno on failure (which indicates the failure reason)*/
+#if HAVE_DECL_IBV_QUERY_ECE
+  IBV_INT_CHECK_RET_ERRNO_OPTIONAL(ibv_query_ece(qp, ece), 0, "ibv_query_ece", supported);
+#else
+    INFO(NCCL_NET, "Call to ibv_query_ece is skipped, doesn't exist");
+    *supported = 0;
+    return ncclSuccess;
+#endif
+}
+
+ncclResult_t wrap_ibv_set_ece(struct ibv_qp *qp, struct ibv_ece *ece, int* supported) { /*returns 0 on success, or the value of errno on failure (which indicates the failure reason)*/
+#if HAVE_DECL_IBV_SET_ECE
+  IBV_INT_CHECK_RET_ERRNO_OPTIONAL(ibv_set_ece(qp, ece), 0, "ibv_set_ece", supported);
+#else
+    INFO(NCCL_NET, "Call to ibv_set_ece skipped, doesn't exist");
+    *supported = 0;
+    return ncclSuccess;
+#endif
 }
 
 ncclResult_t wrap_ibv_event_type_str(char **ret, enum ibv_event_type event) {
