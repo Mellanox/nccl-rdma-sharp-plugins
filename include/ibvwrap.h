@@ -4,7 +4,7 @@
  * Copyright (c) 2005, 2006, 2007 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2005 PathScale, Inc.  All rights reserved.
  *
- * Copyright (c) 2015-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2015-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -59,6 +59,8 @@ static inline ncclResult_t wrap_ibv_poll_cq(struct ibv_cq *cq, int num_entries, 
 ncclResult_t wrap_ibv_create_qp(struct ibv_qp **ret, struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr);
 ncclResult_t wrap_ibv_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
 ncclResult_t wrap_ibv_destroy_qp(struct ibv_qp *qp);
+ncclResult_t wrap_ibv_query_ece(struct ibv_qp *qp, struct ibv_ece *ece, int* supported);
+ncclResult_t wrap_ibv_set_ece(struct ibv_qp *qp, struct ibv_ece *ece, int* supported);
 ncclResult_t wrap_ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr);
 ncclResult_t wrap_ibv_post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr);
 ncclResult_t wrap_ibv_event_type_str(char **ret, enum ibv_event_type event);

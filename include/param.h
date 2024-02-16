@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2017-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2017-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -12,6 +12,7 @@
 const char* userHomeDir();
 void setEnvFile(const char* fileName);
 void initEnv();
+const char *ncclGetEnv(const char *name);
 
 void ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int64_t* cache);
 

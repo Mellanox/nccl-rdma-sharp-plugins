@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2016-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -278,7 +278,7 @@ static ncclResult_t ucx_init_context(ucp_context_h *ctx, int dev) {
 
   if (ucp_ctx[dev] == NULL) {
     snprintf(ucx_dev_name, PATH_MAX, "%s:%d", ncclIbDevs[dev].devName,
-             ncclIbDevs[dev].port);
+             ncclIbDevs[dev].portNum);
     UCXCHECK(ucp_config_read("NCCL", NULL, &config));
     UCXCHECK(ucp_config_modify(config, "NET_DEVICES", ucx_dev_name));
 
