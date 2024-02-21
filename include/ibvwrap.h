@@ -22,6 +22,23 @@
 #  define IBV_QPF_GRH_REQUIRED                      0
 #endif
 
+#if !HAVE_DECL_IBV_SET_ECE
+struct ibv_ece {
+	/*
+	 * Unique identifier of the provider vendor on the network.
+	 * The providers will set IEEE OUI here to distinguish
+	 * itself in non-homogenius network.
+	 */
+	uint32_t vendor_id;
+	/*
+	 * Provider specific attributes which are supported or
+	 * needed to be enabled by ECE users.
+	 */
+	uint32_t options;
+	uint32_t comp_mask;
+};
+#endif
+
 ncclResult_t wrap_ibv_fork_init(void);
 ncclResult_t wrap_ibv_get_device_list(struct ibv_device ***ret, int *num_devices);
 ncclResult_t wrap_ibv_free_device_list(struct ibv_device **list);
