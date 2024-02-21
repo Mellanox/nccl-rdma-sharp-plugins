@@ -383,7 +383,7 @@ ncclResult_t ncclSharpRegMrDmaBuf(void* collComm, void* data, size_t size, int t
   }
   TRACE(NCCL_INIT,"sharpRegAddr %lx size %ld handle %x", data, size, mh->mr);
 
-  NCCLCHECK(ncclNetPlugin_v7.regMrDmaBuf(cComm->recvComm, data, size, type, offset, fd, &mh->ncclIbMr));
+  NCCLCHECK(ncclNetPlugin_v8.regMrDmaBuf(cComm->recvComm, data, size, type, offset, fd, &mh->ncclIbMr));
 
   *mhandle = mh;
   return ncclSuccess;
@@ -405,7 +405,7 @@ ncclResult_t ncclSharpRegMr(void* collComm, void* data, size_t size, int type, v
   }
   TRACE(NCCL_INIT,"sharpRegAddr %lx size %ld handle %x", data, size, mh->mr);
 
-  NCCLCHECK(ncclNetPlugin_v7.regMr(cComm->recvComm, data, size, type, &mh->ncclIbMr));
+  NCCLCHECK(ncclNetPlugin_v8.regMr(cComm->recvComm, data, size, type, &mh->ncclIbMr));
 
   *mhandle = mh;
    return ncclSuccess;
