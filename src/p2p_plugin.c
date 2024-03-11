@@ -334,6 +334,7 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIb
           pthread_mutex_init(&ncclIbDevs[ncclNIbDevs].lock, NULL);
           ncclIbDevs[ncclNIbDevs].device = d;
           ncclIbDevs[ncclNIbDevs].guid = devAttr.sys_image_guid;
+          ncclIbDevs[ncclNIbDevs].portAttr = portAttr;
           ncclIbDevs[ncclNIbDevs].portNum = port_num;
           ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
           ncclIbDevs[ncclNIbDevs].speed = nccl_p2p_ib_speed(portAttr.active_speed) * nccl_p2p_ib_width(portAttr.active_width);
