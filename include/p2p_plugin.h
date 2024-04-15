@@ -77,13 +77,14 @@ struct ncclIbRequest {
 struct ncclIbGidInfo {
   uint8_t link_layer;
   union ibv_gid localGid;
+  int32_t localGidIndex;
 };
 
 typedef struct ncclIbNetCommDevBase {
   int ibDevN;
   struct ibv_pd* pd;
   struct ibv_cq* cq;
-  uint64_t pad[1];
+  uint64_t pad[2];
   struct ncclIbGidInfo gidInfo;
 } ncclIbNetCommDevBase;
 

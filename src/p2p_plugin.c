@@ -276,7 +276,7 @@ int ncclIbFindMatchingDev(int dev) {
 ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIbIfName, union ncclSocketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction)
 {
   int ncclNIbDevs = *num_devs;
-
+  ncclResult_t ret;
   pluginLogFunction = logFunction;
   if (ncclNIbDevs == -1) {
     pthread_mutex_lock(&nccl_p2p_lock);
@@ -287,7 +287,8 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIb
       ncclNSharpDevs = 0;
       if (ncclFindInterfaces(ncclIbIfName, ncclIbIfAddr, MAX_IF_NAME_SIZE, 1) != 1) {
         WARN("NET/IB : No IP interface found.");
-        return ncclInternalError;
+        ret = ncclInternalError;
+        goto fail;
       }
 
       // Detect IB cards
@@ -302,7 +303,7 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIb
       if (searchExact) userIbEnv++;
       int nUserIfs = parseStringList(userIbEnv, userIfs, MAX_IB_DEVS);
 
-      if (ncclSuccess != wrap_ibv_get_device_list(&devices, &nIbDevs)) return ncclInternalError;
+      if (ncclSuccess != wrap_ibv_get_device_list(&devices, &nIbDevs)) { ret = ncclInternalError; goto fail; }
 
       for (int d=0; d<nIbDevs; d++) {
         struct ibv_context * context;
@@ -314,7 +315,7 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIb
         struct ibv_device_attr devAttr;
         if (ncclSuccess != wrap_ibv_query_device(context, &devAttr)) {
           WARN("NET/IB : Unable to query device %s", devices[d]->name);
-          if (ncclSuccess != wrap_ibv_close_device(context)) { return ncclInternalError; }
+          if (ncclSuccess != wrap_ibv_close_device(context)) { ret = ncclInternalError; goto fail; }
           continue;
         }
         for (int port_num = 1; port_num <= devAttr.phys_port_cnt; port_num++) {
@@ -394,9 +395,9 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIb
           ncclNIbDevs++;
           nPorts++;
         }
-        if (nPorts == 0 && ncclSuccess != wrap_ibv_close_device(context)) { return ncclInternalError; }
+        if (nPorts == 0 && ncclSuccess != wrap_ibv_close_device(context))  { ret = ncclInternalError; goto fail; }
       }
-      if (nIbDevs && (ncclSuccess != wrap_ibv_free_device_list(devices))) { return ncclInternalError; };
+      if (nIbDevs && (ncclSuccess != wrap_ibv_free_device_list(devices))) { ret = ncclInternalError; goto fail; };
     }
     if (ncclNIbDevs == 0) {
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : No device found.");
@@ -444,7 +445,9 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIb
     pthread_mutex_unlock(&nccl_p2p_lock);
   }
   return ncclSuccess;
-
+fail:
+  pthread_mutex_unlock(&nccl_p2p_lock);
+  return ret;
 }
 
 ncclResult_t nccl_p2p_ib_pci_path(ncclIbDev *devs, int num_devs, char* dev_name, char** path, int* real_port)
