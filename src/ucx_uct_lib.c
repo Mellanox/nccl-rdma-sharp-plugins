@@ -14,6 +14,10 @@ nccl_uct_context_t context = {
     .dev_count = -1
 };
 
+void nccl_uct_empty_callback(uct_completion_t *comp) {
+  assert(comp->count == 0);
+}
+
 ncclResult_t nccl_uct_iface_set_handler(nccl_uct_iface_t *uct_iface,
                                         int id, uct_am_callback_t callback) {
   UCXCHECK(uct_iface_set_am_handler(uct_iface->iface, id, callback, NULL, 0),
@@ -41,6 +45,14 @@ static uct_iface_h nccl_uct_resource_iface_open(uct_worker_h worker,
 
   UCXCHECK(uct_md_iface_config_read(md, tl->tl_name, NULL, NULL, &config),
            return NULL, "read MD iface config for TL '%s'", tl->tl_name);
+
+  status = uct_config_modify(config, "IB_TX_INLINE_RESP", "0");
+  if (status != UCS_OK) {
+      WARN("Failed to modify MD configuration for '%s', error %s",
+           tl->tl_name, ucs_status_string(status));
+      uct_config_release(config);
+      return NULL;
+  }
 
   params.field_mask =
       UCT_IFACE_PARAM_FIELD_OPEN_MODE | UCT_IFACE_PARAM_FIELD_DEVICE |
@@ -739,7 +751,7 @@ ncclResult_t nccl_uct_flush(nccl_uct_comm_t *base_comm, void *data, int size,
   uct_iov_t iov;
 
   iov.buffer = base_comm->gpu_flush.mem;
-  iov.length = base_comm->uct_iface->min_get_zcopy;
+  iov.length = base_comm->uct_iface->min_get_zcopy? : 1;
   iov.memh   = base_comm->gpu_flush.memh;
   iov.stride = 0;
   iov.count  = 1;

@@ -21,6 +21,13 @@
 #define NCCL_UCT_REG_ALIGN           4096
 
 typedef enum {
+  NCCL_UCT_AM_RTR = 14, /* Use particular values */
+  NCCL_UCT_AM_ATP = 15,
+  NCCL_UCT_AM_RTS = 16,
+  NCCL_UCT_AM_ATS = 17
+} nccl_uct_am_type_t;
+
+typedef enum {
   NCCL_UCT_START = 0,
   NCCL_UCT_CONNECT,
   NCCL_UCT_ACCEPT,
@@ -206,6 +213,7 @@ int nccl_uct_flush_index(nccl_uct_comm_t *base, int *sizes, int n);
 ncclResult_t nccl_uct_flush(nccl_uct_comm_t *base_comm, void *data, int size,
                             nccl_uct_memh_t *uct_memh,
                             uct_completion_t *completion, void **request);
+void nccl_uct_empty_callback(uct_completion_t *comp);
 
 /* NCCL common plugin callbacks */
 ncclResult_t nccl_uct_listen(int dev, void *listen_handle, void **listen_comm);

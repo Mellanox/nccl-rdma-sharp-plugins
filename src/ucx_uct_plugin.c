@@ -7,11 +7,6 @@
 #include "ucx_uct_lib.h"
 
 typedef enum {
-  NCCL_UCT_AM_RTR = 14, /* Use particular values */
-  NCCL_UCT_AM_ATP = 15
-} nccl_uct_am_type_t;
-
-typedef enum {
   NCCL_UCT_REQ_IRECV  = -1,
   NCCL_UCT_REQ_IFLUSH = -2
 } nccl_uct_request_type_t;
@@ -135,10 +130,6 @@ static void nccl_uct_rdesc_set(nccl_uct_rdesc_t *rdesc, uint64_t id, int n,
     desc->chunk[i].matched = 0;
     desc->chunk[i].rkey    = uct_memh[i]->bundle.rkey;
   }
-}
-
-static void nccl_uct_empty_callback(uct_completion_t *comp) {
-  assert(comp->count == 0);
 }
 
 static nccl_uct_req_t *nccl_uct_rdesc_get_req(nccl_uct_rdesc_t *rdesc, int i,
