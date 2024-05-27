@@ -26,7 +26,8 @@ libnccl_net_la_SOURCES  += \
 	ucx_plugin.c \
 	ucx_rma_plugin.c \
 	ucx_uct_lib.c \
-	ucx_uct_plugin.c
+	ucx_uct_plugin.c \
+	ucx_uct_rd_plugin.c
 endif
 
 if HAVE_SHARP_PLUGIN

@@ -27,6 +27,10 @@ extern ncclNet_v8_t ucxUctPlugin_v8;
 extern ncclNet_v7_t ucxUctPlugin_v7;
 extern ncclNet_v6_t ucxUctPlugin_v6;
 extern ncclNet_v5_t ucxUctPlugin_v5;
+extern ncclNet_v8_t ucxUctRdPlugin_v8;
+extern ncclNet_v7_t ucxUctRdPlugin_v7;
+extern ncclNet_v6_t ucxUctRdPlugin_v6;
+extern ncclNet_v5_t ucxUctRdPlugin_v5;
 #endif
 
 extern ncclNet_v8_t ibPlugin_v8;
@@ -77,6 +81,10 @@ ncclNet_v5_t ncclNetPlugin_v5 = {
 
 static nccl_p2p_plugin_t p2p_plugin = NCCL_P2P_LAST;
 
+static int nccl_p2p_is_uct_plugin(nccl_p2p_plugin_t plugin) {
+  return (plugin == NCCL_P2P_UCX_UCT) || (plugin == NCCL_P2P_UCX_UCT_RD);
+}
+
 static void pluginSetup()
 {
   p2p_plugin = NCCL_P2P_IB;
@@ -92,6 +100,7 @@ static void pluginSetup()
     else if (!strcasecmp(p2p_layer, "ucx")) p2p_plugin = NCCL_P2P_UCX;
     else if (!strcasecmp(p2p_layer, "ucx_rma")) p2p_plugin = NCCL_P2P_UCX_RMA;
     else if (!strcasecmp(p2p_layer, "ucx_uct")) p2p_plugin = NCCL_P2P_UCX_UCT;
+    else if (!strcasecmp(p2p_layer, "ucx_uct_read")) p2p_plugin = NCCL_P2P_UCX_UCT_RD;
 #endif
     else {
       WARN("Invalid value %s for NCCL_PLUGIN_P2P, using default", p2p_layer);
@@ -116,6 +125,12 @@ static void pluginSetup()
       ncclNetPlugin_v7 = ucxUctPlugin_v7;
       ncclNetPlugin_v6 = ucxUctPlugin_v6;
       ncclNetPlugin_v5 = ucxUctPlugin_v5;
+      break;
+    case NCCL_P2P_UCX_UCT_RD:
+      ncclNetPlugin_v8 = ucxUctRdPlugin_v8;
+      ncclNetPlugin_v7 = ucxUctRdPlugin_v7;
+      ncclNetPlugin_v6 = ucxUctRdPlugin_v6;
+      ncclNetPlugin_v5 = ucxUctRdPlugin_v5;
       break;
 #endif
     default:
@@ -221,7 +236,8 @@ ncclResult_t nccl_p2p_ib_get_properties(ncclIbDev *devs, int dev, ncclNetPropert
     INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (nvidia-peermem) enabled for HCA %d '%s", dev, devs[dev].devName);
   }
   props->regIsGlobal = 1;
-  if (((p2p_plugin == NCCL_P2P_UCX_UCT) || (p2p_plugin == NCCL_P2P_IB)) && nccl_p2p_dmabuf_support(dev) == ncclSuccess) {
+  if ((nccl_p2p_is_uct_plugin(p2p_plugin) || (p2p_plugin == NCCL_P2P_IB)) &&
+      nccl_p2p_dmabuf_support(dev) == ncclSuccess) {
     props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
     INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (DMABUF) enabled for HCA %d '%s", dev, devs[dev].devName);
   }
@@ -231,7 +247,7 @@ ncclResult_t nccl_p2p_ib_get_properties(ncclIbDev *devs, int dev, ncclNetPropert
   props->maxComms = ibDev->maxQp;
 
   if (p2p_plugin == NCCL_P2P_IB || p2p_plugin == NCCL_P2P_UCX ||
-      p2p_plugin == NCCL_P2P_UCX_UCT) {
+      nccl_p2p_is_uct_plugin(p2p_plugin)) {
     props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
   } else {
     props->maxRecvs = 1;
