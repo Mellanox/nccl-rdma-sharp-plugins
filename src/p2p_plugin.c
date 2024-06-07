@@ -332,7 +332,10 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIb
       int nUserIfs = parseStringList(userIbEnv, userIfs, MAX_IB_DEVS);
 
       if (ncclSuccess != wrap_ibv_get_device_list(&devices, &nIbDevs)) { ret = ncclInternalError; goto fail; }
-
+      // Should NCCL merge multi-port devices into one?
+      int mergeNics;
+      mergeNics = ncclParamIbMergeNics();
+build_ib_list:
       for (int d=0; d<nIbDevs; d++) {
         struct ibv_context * context;
         if (ncclSuccess != wrap_ibv_open_device(&context, devices[d]) || context == NULL) {
@@ -398,7 +401,7 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIb
           }
 
           int mergedDev = ncclNMergedIbDevs;
-          if (ncclParamIbMergeNics()) {
+          if (mergeNics) {
             mergedDev = ncclIbFindMatchingDev(ncclNIbDevs);
           }
 
@@ -425,6 +428,21 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIb
         }
         if (nPorts == 0 && ncclSuccess != wrap_ibv_close_device(context))  { ret = ncclInternalError; goto fail; }
       }
+      
+      // Detect if there are both multi-port and single-port NICs in the system. If so, disable port merging and build the list again
+      if (mergeNics) {
+        for (int d = 0; d < ncclNMergedIbDevs; d++) {
+          if (ncclIbMergedDevs[d].ndevs != ncclIbMergedDevs[0].ndevs) {
+            INFO(NCCL_NET, "Detected a mix of single and multiple-port NICs. Force-disabling NCCL_IB_MERGE_NICS");
+            mergeNics = 0;
+            ncclNIbDevs = 0;
+            ncclNMergedIbDevs = 0;
+            memset(ncclIbMergedDevs, 0, sizeof(ncclIbMergedDevs));
+            goto build_ib_list;
+          }
+        }
+      }
+
       if (nIbDevs && (ncclSuccess != wrap_ibv_free_device_list(devices))) { ret = ncclInternalError; goto fail; };
     }
     if (ncclNIbDevs == 0) {
