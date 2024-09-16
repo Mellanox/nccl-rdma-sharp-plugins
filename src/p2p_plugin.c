@@ -171,53 +171,73 @@ ncclResult_t pluginInit_v5(ncclDebugLogger_t logFunction) {
   return ncclNetPlugin_v5.init(logFunction);
 }
 
+// Detect whether GDR can work on a given NIC with the current CUDA device
+// Returns :
+// ncclSuccess : GDR works
+// ncclSystemError : no module or module loaded but not supported by GPU
+#define KNL_MODULE_LOADED(a) ((access(a, F_OK) == -1) ? 0 : 1)
+static int ncclIbGdrModuleLoaded = 0; // 1 = true, 0 = false
+static void ibGdrSupportInitOnce() {
+  // Check for the nv_peer_mem module being loaded
+  ncclIbGdrModuleLoaded = KNL_MODULE_LOADED("/sys/kernel/mm/memory_peers/nv_mem/version") ||
+                          KNL_MODULE_LOADED("/sys/kernel/mm/memory_peers/nv_mem_nc/version") ||
+                          KNL_MODULE_LOADED("/sys/module/nvidia_peermem/version");
+}
+
 ncclResult_t nccl_p2p_gdr_support()
 {
-  static int module_loaded = -1;
-
-  if (module_loaded == -1) {
-    module_loaded = (access("/sys/kernel/mm/memory_peers/nv_mem/version", F_OK) == -1) ? 0 : 1;
-  }
-
-  if (module_loaded == 0) {
-      return ncclSystemError;
-  }
-
+  static pthread_once_t once = PTHREAD_ONCE_INIT;
+  pthread_once(&once, ibGdrSupportInitOnce);
+  if (!ncclIbGdrModuleLoaded)
+    return ncclSystemError;
   return ncclSuccess;
 }
 
+static __thread int ibDmaSupportInitDev; // which device to init, must be thread local
+static void ibDmaBufSupportInitOnce(){
+  ncclResult_t res;
+  // select the appropriate
+  struct ncclIbMergedDev* mergedDev = ncclIbMergedDevs + ibDmaSupportInitDev;
+  // Test each real devices
+  int dev_fail = 0;
+  for (int i = 0; i < mergedDev->ndevs; i++) {
+    int ibDev = mergedDev->devs[i];
+    struct ibv_pd* pd;
+    struct ibv_context* ctx = ncclIbDevs[ibDev].context;
+    NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
+    // Test kernel DMA-BUF support with a dummy call (fd=-1)
+    (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
+    // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
+    dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
+    NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
+    // stop the search and goto failure
+    if (dev_fail) goto failure;
+  }
+  mergedDev->dmaBufSupported = 1;
+  return;
+failure:
+  mergedDev->dmaBufSupported = -1;
+  return;
+}
+
+
+struct oncewrap {
+  pthread_once_t once;
+};
+static struct oncewrap onces[MAX_IB_DEVS];
 // Detect whether DMA-BUF support is present in the kernel
 // Returns :
 // ncclSuccess : DMA-BUF support is available
 // ncclSystemError : DMA-BUF is not supported by the kernel
 ncclResult_t nccl_p2p_dmabuf_support(int dev) {
-  static int dmaBufSupported = -1;
-  if (dmaBufSupported == -1) {
-    ncclResult_t res;
-    struct ibv_pd* pd;
-    struct ibv_context* ctx;
-    struct ncclIbMergedDev* mergedDev = ncclIbMergedDevs + dev;
+  // init the device only once
+  ibDmaSupportInitDev = dev;
+  pthread_once(&onces[dev].once, ibDmaBufSupportInitOnce);
 
-    // Test each dev
-    for (int i = 0; i < mergedDev->ndevs; i++) {
-      int ibDev = mergedDev->devs[i];
-      ctx = ncclIbDevs[ibDev].context;
-      NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
-      // Test kernel DMA-BUF support with a dummy call (fd=-1)
-      (void) wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL/*offset*/, 0ULL/*len*/, 0ULL/*iova*/, -1/*fd*/, 0/*flags*/);
-      // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
-      dmaBufSupported = (errno != EOPNOTSUPP && errno != EPROTONOSUPPORT) ? 1 : 0;
-      NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
-    }
-
-  }
-  if (dmaBufSupported == 0) return ncclSystemError;
-  return ncclSuccess;
-failure:
-  dmaBufSupported = 0;
+  int dmaBufSupported = ncclIbMergedDevs[dev].dmaBufSupported;
+  if (dmaBufSupported == 1) return ncclSuccess;
   return ncclSystemError;
 }
-
 
 ncclResult_t nccl_p2p_ib_get_properties(ncclIbDev *devs, int dev, ncclNetProperties_t* props)
 {
@@ -258,15 +278,77 @@ ncclResult_t nccl_p2p_ib_get_properties(ncclIbDev *devs, int dev, ncclNetPropert
   return ncclSuccess;
 }
 
+ncclResult_t ncclIbStatsInit(struct ncclIbStats* stat) {
+  __atomic_store_n(&stat->fatalErrorCount, 0, __ATOMIC_RELAXED);
+  return ncclSuccess;
+}
+
+static void ncclIbStatsFatalError(struct ncclIbStats* stat){
+  __atomic_fetch_add(&stat->fatalErrorCount, 1, __ATOMIC_RELAXED);
+}
+static void ncclIbQpFatalError(struct ibv_qp* qp) {
+  ncclIbStatsFatalError((struct ncclIbStats*)qp->qp_context);
+}
+static void ncclIbCqFatalError(struct ibv_cq* cq) {
+  ncclIbStatsFatalError((struct ncclIbStats*)cq->cq_context);
+}
+static void ncclIbDevFatalError(struct ncclIbDev* dev) {
+  ncclIbStatsFatalError(&dev->stats);
+}
+
 static void* ncclIbAsyncThreadMain(void* args) {
   struct ncclIbDev* dev = (struct ncclIbDev*)args;
   while (1) {
     struct ibv_async_event event;
     if (ncclSuccess != wrap_ibv_get_async_event(dev->context, &event)) { break; }
     char *str;
+    struct ibv_cq* cq = event.element.cq;    // only valid if CQ error
+    struct ibv_qp* qp = event.element.qp;    // only valid if QP error
+    struct ibv_srq* srq = event.element.srq; // only valid if SRQ error
     if (ncclSuccess != wrap_ibv_event_type_str(&str, event.event_type)) { break; }
-    if (event.event_type != IBV_EVENT_COMM_EST)
-      WARN("NET/IB : %s:%d Got async event : %s", dev->devName, dev->portNum, str);
+    switch (event.event_type) {
+    case IBV_EVENT_DEVICE_FATAL:
+      // the above is device fatal error
+      WARN("NET/IB : %s:%d async fatal event: %s", dev->devName, dev->portNum, str);
+      ncclIbDevFatalError(dev);
+      break;
+    case IBV_EVENT_CQ_ERR:
+      // the above is a CQ fatal error
+      WARN("NET/IB : %s:%d async fatal event on CQ (%p): %s", dev->devName, dev->portNum, cq, str);
+      ncclIbCqFatalError(cq);
+      break;
+    case IBV_EVENT_QP_FATAL:
+    case IBV_EVENT_QP_REQ_ERR:
+    case IBV_EVENT_QP_ACCESS_ERR:
+      // the above are QP fatal errors
+      WARN("NET/IB : %s:%d async fatal event on QP (%p): %s", dev->devName, dev->portNum, qp, str);
+      ncclIbQpFatalError(qp);
+      break;
+    case IBV_EVENT_SRQ_ERR:
+      // SRQ are not used in NCCL
+      WARN("NET/IB : %s:%d async fatal event on SRQ, unused for now (%p): %s", dev->devName, dev->portNum, srq, str);
+      break;
+    case IBV_EVENT_PATH_MIG_ERR:
+    case IBV_EVENT_PORT_ERR:
+    case IBV_EVENT_PATH_MIG:
+    case IBV_EVENT_PORT_ACTIVE:
+    case IBV_EVENT_SQ_DRAINED:
+    case IBV_EVENT_LID_CHANGE:
+    case IBV_EVENT_PKEY_CHANGE:
+    case IBV_EVENT_SM_CHANGE:
+    case IBV_EVENT_QP_LAST_WQE_REACHED:
+    case IBV_EVENT_CLIENT_REREGISTER:
+    case IBV_EVENT_SRQ_LIMIT_REACHED:
+      // the above are non-fatal
+      WARN("NET/IB : %s:%d Got async error event: %s", dev->devName, dev->portNum, str);
+      break;
+    case IBV_EVENT_COMM_EST:
+      break;
+    default:
+      WARN("NET/IB : %s:%d unknown event type (%d)", dev->devName, dev->portNum, event.event_type);
+      break;
+    }
+    // acknowledgment needs to happen last to avoid user-after-free
     if (ncclSuccess != wrap_ibv_ack_async_event(&event)) { break; }
   }
   return NULL;
@@ -304,9 +386,11 @@ int ncclIbFindMatchingDev(int dev) {
 ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIbIfName, union ncclSocketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction)
 {
   int ncclNIbDevs = *num_devs;
-  ncclResult_t ret;
+  ncclResult_t ret = ncclSuccess;
   pluginLogFunction = logFunction;
   if (ncclNIbDevs == -1) {
+    for (int i=0; i< MAX_IB_DEVS; i++)
+      onces[i].once = PTHREAD_ONCE_INIT;
     pthread_mutex_lock(&nccl_p2p_lock);
     wrap_ibv_fork_init();
     if (ncclNIbDevs == -1) {
@@ -374,11 +458,12 @@ build_ib_list:
           ncclIbDevs[ncclNIbDevs].pdRefs = 0;
           ncclIbDevs[ncclNIbDevs].pd = NULL;
           strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
-          NCCLCHECK(nccl_p2p_ib_pci_path(ncclIbDevs, ncclNIbDevs, ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort));
+          NCCLCHECKGOTO(nccl_p2p_ib_pci_path(ncclIbDevs, ncclNIbDevs, ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort), ret, fail);
           ncclIbDevs[ncclNIbDevs].maxQp = devAttr.max_qp;
           ncclIbDevs[ncclNIbDevs].mrCache.capacity = 0;
           ncclIbDevs[ncclNIbDevs].mrCache.population = 0;
           ncclIbDevs[ncclNIbDevs].mrCache.slots = NULL;
+          NCCLCHECK(ncclIbStatsInit(&ncclIbDevs[ncclNIbDevs].stats));
 
          // Enable ADAPTIVE_ROUTING by default on IB networks
           // But allow it to be overloaded by an env parameter
@@ -395,9 +480,9 @@ build_ib_list:
           TRACE(NCCL_NET,"NET/IB: [%d] %s:%s:%d/%s speed=%d context=%p pciPath=%s ar=%d", d, devices[d]->name, devices[d]->dev_name, ncclIbDevs[ncclNIbDevs].portNum,
             portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE", ncclIbDevs[ncclNIbDevs].speed, context, ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar);
           if (ncclIbAsyncThread != NULL) {
-            pthread_create(ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs);
+            PTHREADCHECKGOTO(pthread_create(ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs), "pthread_create", ret, fail);
             ncclSetThreadName(*ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
-            pthread_detach(*ncclIbAsyncThread); // will not be pthread_join()'d
+            PTHREADCHECKGOTO(pthread_detach(*ncclIbAsyncThread), "pthread_detach", ret, fail); // will not be pthread_join()'d
           }
 
           int mergedDev = ncclNMergedIbDevs;
@@ -490,10 +575,11 @@ build_ib_list:
     *num_devs = ncclNMergedIbDevs;
     pthread_mutex_unlock(&nccl_p2p_lock);
   }
-  return ncclSuccess;
+exit:
+  return ret;
 fail:
   pthread_mutex_unlock(&nccl_p2p_lock);
-  return ret;
+  goto exit;
 }
 
 ncclResult_t nccl_p2p_ib_pci_path(ncclIbDev *devs, int num_devs, char* dev_name, char** path, int* real_port)
