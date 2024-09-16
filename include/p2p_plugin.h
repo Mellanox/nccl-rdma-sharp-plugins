@@ -53,7 +53,12 @@ struct ncclIbMergedDev {
   int devs[NCCL_IB_MAX_DEVS_PER_NIC]; // Points to an index in ncclIbDevs
   int speed;
   char devName[MAX_MERGED_DEV_NAME]; // Up to NCCL_IB_MAX_DEVS_PER_NIC * name size, and a character for each '+'
+  int dmaBufSupported;               //  0 = uninit, 1 = yes, -1 = no
 } __attribute__((aligned(64)));
+
+struct ncclIbStats {
+  int fatalErrorCount;
+};
 
 struct ncclIbRequest {
   struct ncclIbNetCommBase* base;
@@ -108,6 +113,7 @@ typedef struct ncclIbDev {
   struct   ncclIbMrCache mrCache;
   int ar; // ADAPTIVE_ROUTING
   struct ibv_port_attr portAttr;
+  struct ncclIbStats stats;
 } __attribute__((aligned(64))) ncclIbDev;
 
 
@@ -143,5 +149,7 @@ int64_t ncclParamIbMergeNics();
 int ncclIbRelaxedOrderingCapable(void);
 
 nccl_p2p_plugin_t nccl_p2p_get_plugin_type();
+
+ncclResult_t ncclIbStatsInit(struct ncclIbStats* stat);
 
 #endif
