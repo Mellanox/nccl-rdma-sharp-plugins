@@ -1144,8 +1144,9 @@ static ncclResult_t nccl_ucx_rma_test(void *request, int *done, int *sizes) {
             (atp->id == req->rtr_id) &&
             ((comm->total > 1) || (comm->inflight_rkey == 0));
     if (*done) {
-      assert(sizes != NULL);
-      memcpy(sizes, atp->sizes, sizeof(*atp->sizes) * atp->count);
+      if (sizes != NULL) {
+        memcpy(sizes, atp->sizes, sizeof(*atp->sizes) * atp->count);
+      }
       nccl_ucp_req_release(req);
     }
   } else {
