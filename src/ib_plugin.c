@@ -762,6 +762,7 @@ ib_connect_check:
   }
 
   struct ncclIbConnectionMetadata meta;
+  memset(&meta, 0, sizeof(meta));
   meta.ndevs = comm->base.ndevs;
 
   // Alternate QPs between devices
@@ -1003,6 +1004,7 @@ ib_recv:
 
   // Metadata to send back to requestor (sender)
   struct ncclIbConnectionMetadata meta;
+  memset(&meta, 0, sizeof(meta));
   for (int i = 0; i < rComm->base.ndevs; i++) {
     rCommDev = rComm->devs + i;
     ibDevN = mergedDev->devs[i];
@@ -1050,6 +1052,8 @@ ib_recv:
       // Store this in our own qpInfo for returning to the requestor
       if (meta.qpInfo[q].ece_supported)
         NCCLCHECKGOTO(wrap_ibv_query_ece(qp->qp, &meta.qpInfo[q].ece, &meta.qpInfo[q].ece_supported), ret, fail);
+    } else {
+      meta.qpInfo[q].ece_supported = 0;
     }
     bool override_tc = (q == 0) ? true : false;
     NCCLCHECKGOTO(ncclIbRtrQp(qp->qp, &rCommDev->base.gidInfo, remMeta.qpInfo[q].qpn, remDevInfo, override_tc), ret, fail);
