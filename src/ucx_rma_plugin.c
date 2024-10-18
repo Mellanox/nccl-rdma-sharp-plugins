@@ -40,6 +40,7 @@ extern ncclDebugLogger_t pluginLogFunction;
 static char nccl_ucx_rma_tls[32] = "";
 static char nccl_ucx_rma_zcopy_thresh[32] ="";
 static int ncclNIbDevs = -1;
+static int ncclNMergedIbDevs = -1;
 
 #define MAX_UCX_RKEY_BUF_SIZE 128
 typedef struct nccl_ucx_rma_rkey_buf {
@@ -77,7 +78,27 @@ ncclResult_t nccl_ucx_rma_devices(int* ndev) {
 
 ncclResult_t nccl_ucx_rma_get_properties(int dev, ncclNetProperties_t* props)
 {
-  return nccl_p2p_ib_get_properties(ncclIbDevs, dev, props);
+  return nccl_p2p_ib_get_properties(ncclIbDevs, ncclNMergedIbDevs, dev, props);
+}
+
+ncclResult_t nccl_ucx_rma_get_properties_v8(int dev, ncclNetProperties_v8_t* props_v8)
+{
+  ncclNetProperties_t props;
+  ncclResult_t ret = nccl_ucx_rma_get_properties(dev, &props);
+  if (ret != ncclSuccess) return ret;
+  props_v8->name = props.name;
+  props_v8->pciPath = props.pciPath;
+  props_v8->guid = props.guid;
+  props_v8->ptrSupport = props.ptrSupport;
+  props_v8->regIsGlobal = props.regIsGlobal;
+  props_v8->speed = props.speed;
+  props_v8->latency = props.latency;
+  props_v8->port = props.port;
+  props_v8->maxComms = props.maxComms;
+  props_v8->maxRecvs = props.maxRecvs;
+  props_v8->netDeviceType = props.netDeviceType;
+  props_v8->netDeviceVersion = props.netDeviceVersion;
+  return ncclSuccess;
 }
 
 ncclResult_t nccl_ucx_rma_get_properties_v7(int dev, ncclNetProperties_v7_t* props_v7)
@@ -386,8 +407,8 @@ ncclResult_t nccl_ucx_rma_init(ncclDebugLogger_t logFunction)
 {
   char *config_env;
   if (ncclParamUCXRMADisable()) return ncclInternalError;
-  NCCLCHECK(nccl_p2p_ib_init(&ncclNIbDevs, ncclIbDevs, if_name, &nccl_ucx_if_addr,
-                          NULL, logFunction));
+  NCCLCHECK(nccl_p2p_ib_init(&ncclNIbDevs, &ncclNMergedIbDevs, ncclIbDevs, if_name, &nccl_ucx_if_addr,
+                          NULL, logFunction, 1));
 
   if (strlen(nccl_ucx_rma_tls) == 0) {
     config_env = getenv("NCCL_UCX_TLS");
@@ -422,7 +443,7 @@ ncclResult_t nccl_ucx_rma_listen(int dev, void *handle, void **listen_comm)
 
   my_handle->magic = NCCL_SOCKET_MAGIC;
   NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(nccl_ucx_rma_listen_comm_t)));
-  NCCLCHECK(ncclSocketInit(&comm->sock, &nccl_ucx_if_addr, my_handle->magic, ncclSocketTypeNetIb, NULL, 1));
+  NCCLCHECK(ncclSocketInit(&comm->sock, &nccl_ucx_if_addr, my_handle->magic, ncclSocketTypeNetIb, NULL, 1, 0));
   NCCLCHECK(ncclSocketListen(&comm->sock));
   NCCLCHECK(ncclSocketGetAddr(&comm->sock, &my_handle->connectAddr));
 
@@ -471,7 +492,7 @@ ncclResult_t nccl_ucx_rma_connect(int dev, void *handle, void **send_comm, ncclN
   if (stage->state == ncclUCXCommStateConnect) goto ucx_connect_check;
 
   NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(*comm)));
-  NCCLCHECK(ncclSocketInit(&comm->super.sock, &recv_handle->connectAddr, recv_handle->magic, ncclSocketTypeNetIb, NULL, 1));
+  NCCLCHECK(ncclSocketInit(&comm->super.sock, &recv_handle->connectAddr, recv_handle->magic, ncclSocketTypeNetIb, NULL, 1, 0));
   stage->comm = comm;
   stage->state = ncclUCXCommStateConnect;
   NCCLCHECK(ncclSocketConnect(&comm->super.sock));
@@ -546,7 +567,7 @@ static ncclResult_t nccl_ucx_rma_init_ep(struct ncclSocket *sock, ucp_worker_h w
     NCCLCHECK(ncclSocketRecv(sock, &peer_addr_len, sizeof(size_t)));
   } else {
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, sock, &peer_addr_len,
-                            sizeof(size_t), &bytes));
+                            sizeof(size_t), &bytes, NULL));
     if (bytes == 0) {
       ep = NULL;
       return ncclSuccess;
@@ -582,7 +603,7 @@ ncclResult_t nccl_ucx_rma_accept(void *listen_comm, void **recv_comm, ncclNetDev
   l_comm->sock.asyncFlag = 1;
   r_comm->super.sock.asyncFlag = 1;
 
-  NCCLCHECK(ncclSocketInit(&r_comm->super.sock, NULL, NCCL_SOCKET_MAGIC, ncclSocketTypeUnknown, NULL, 0));
+  NCCLCHECK(ncclSocketInit(&r_comm->super.sock, NULL, NCCL_SOCKET_MAGIC, ncclSocketTypeUnknown, NULL, 0, 0));
   NCCLCHECK(ncclSocketAccept(&r_comm->super.sock, &l_comm->sock));
 
 ucx_accept_check:
@@ -844,7 +865,7 @@ static ncclResult_t nccl_ucx_rma_recv_check(nccl_ucx_rma_recv_comm_t *comm)
 
   if (comm->super.ready == NCCL_UCX_RMA_RCOMM_WAIT_SCOMM) {
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->super.sock, &rem_comm_state,
-                            sizeof(int), &bytes));
+                            sizeof(int), &bytes, NULL));
     if (bytes == 0) {
       return ncclSuccess;
     }
@@ -878,7 +899,7 @@ static void nccl_ucx_rma_put_isend_cb(void *request, ucs_status_t status, void *
   return;
 }
 
-ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size, int tag,
+ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, size_t size, int tag,
                                 void *mhandle, void **request)
 {
   nccl_ucx_rma_send_comm_t     *comm = (nccl_ucx_rma_send_comm_t*)send_comm;
@@ -965,6 +986,11 @@ ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size, int tag,
   return ncclSuccess;
 }
 
+ncclResult_t nccl_ucx_rma_isend_v8(void* sendComm, void* data, int size, int tag, void* mhandle, void** request) {
+  return nccl_ucx_rma_isend(sendComm, data, (size_t)size, tag, mhandle, request);
+}
+
+
 static void nccl_ucx_rma_dummy_am_cb(void *request, ucs_status_t status)
 {
   return;
@@ -1014,7 +1040,7 @@ ncclResult_t nccl_ucx_rma_post_fifo(nccl_ucx_rma_recv_comm_t *comm,
   return ncclSuccess;
 }
 
-ncclResult_t nccl_ucx_rma_irecv(void *recv_comm, int n, void **data,int *tags, int *sizes,
+ncclResult_t nccl_ucx_rma_irecv(void *recv_comm, int n, void **data, size_t *sizes, int *tags,
                                 void **mhandle, void **request)
 {
   nccl_ucx_rma_recv_comm_t *comm = (nccl_ucx_rma_recv_comm_t*)recv_comm;
@@ -1041,6 +1067,12 @@ ncclResult_t nccl_ucx_rma_irecv(void *recv_comm, int n, void **data,int *tags, i
   req->type   = UCX_RMA_REQ_TYPE_RECV;
   *request = req;
   return ncclSuccess;
+}
+
+ncclResult_t nccl_ucx_rma_irecv_v8(void* recvComm, int n, void** data, int* sizes, int* tags, void** mhandles, void** request) {
+  size_t sizes_sizet[NCCL_NET_IB_MAX_RECVS];
+  for (int i=0; i<n; i++) sizes_sizet[i] = sizes[i];
+  return nccl_ucx_rma_irecv(recvComm, n, data, sizes_sizet, tags, mhandles, request);
 }
 
 ncclResult_t nccl_ucx_rma_iflush(void* recv_comm, int n, void** data, int* sizes,
@@ -1180,7 +1212,7 @@ ncclResult_t nccl_ucx_rma_close_listen(void *listen_comm)
   return ncclSuccess;
 }
 
-ncclNet_v8_t ucxRmaPlugin_v8 = {
+ncclNet_v9_t ucxRmaPlugin_v9 = {
   .name = "UCX-RMA",
   .init = nccl_ucx_rma_init,
   .devices = nccl_ucx_rma_devices,
@@ -1193,6 +1225,29 @@ ncclNet_v8_t ucxRmaPlugin_v8 = {
   .deregMr = nccl_ucx_rma_deregmr,
   .isend = nccl_ucx_rma_isend,
   .irecv = nccl_ucx_rma_irecv,
+  .iflush = nccl_ucx_rma_iflush,
+  .test = nccl_ucx_rma_test,
+  .closeSend = nccl_ucx_rma_close_send,
+  .closeRecv = nccl_ucx_rma_close_recv,
+  .closeListen = nccl_ucx_rma_close_listen,
+  NULL /* getDeviceMr */,
+  NULL /* irecvConsumed */,
+  NULL
+};
+
+ncclNet_v8_t ucxRmaPlugin_v8 = {
+  .name = "UCX-RMA",
+  .init = nccl_ucx_rma_init,
+  .devices = nccl_ucx_rma_devices,
+  .getProperties = nccl_ucx_rma_get_properties_v8,
+  .listen = nccl_ucx_rma_listen,
+  .connect = nccl_ucx_rma_connect,
+  .accept = nccl_ucx_rma_accept,
+  .regMr = nccl_ucx_rma_regmr,
+  .regMrDmaBuf = nccl_ucx_rma_regmr_dmabuf,
+  .deregMr = nccl_ucx_rma_deregmr,
+  .isend = nccl_ucx_rma_isend_v8,
+  .irecv = nccl_ucx_rma_irecv_v8,
   .iflush = nccl_ucx_rma_iflush,
   .test = nccl_ucx_rma_test,
   .closeSend = nccl_ucx_rma_close_send,
@@ -1213,8 +1268,8 @@ ncclNet_v7_t ucxRmaPlugin_v7 = {
   .regMr = nccl_ucx_rma_regmr_v7,
   .regMrDmaBuf = nccl_ucx_rma_regmr_dmabuf,
   .deregMr = nccl_ucx_rma_deregmr,
-  .isend = nccl_ucx_rma_isend,
-  .irecv = nccl_ucx_rma_irecv,
+  .isend = nccl_ucx_rma_isend_v8,
+  .irecv = nccl_ucx_rma_irecv_v8,
   .iflush = nccl_ucx_rma_iflush,
   .test = nccl_ucx_rma_test,
   .closeSend = nccl_ucx_rma_close_send,
@@ -1235,8 +1290,8 @@ ncclNet_v6_t ucxRmaPlugin_v6 = {
   .regMr = nccl_ucx_rma_regmr_v7,
   .regMrDmaBuf = nccl_ucx_rma_regmr_dmabuf,
   .deregMr = nccl_ucx_rma_deregmr,
-  .isend = nccl_ucx_rma_isend,
-  .irecv = nccl_ucx_rma_irecv,
+  .isend = nccl_ucx_rma_isend_v8,
+  .irecv = nccl_ucx_rma_irecv_v8,
   .iflush = nccl_ucx_rma_iflush,
   .test = nccl_ucx_rma_test,
   .closeSend = nccl_ucx_rma_close_send,
@@ -1254,8 +1309,8 @@ ncclNet_v5_t ucxRmaPlugin_v5 = {
   .accept = nccl_ucx_rma_accept_v6,
   .regMr = nccl_ucx_rma_regmr_v7,
   .deregMr = nccl_ucx_rma_deregmr,
-  .isend = nccl_ucx_rma_isend,
-  .irecv = nccl_ucx_rma_irecv,
+  .isend = nccl_ucx_rma_isend_v8,
+  .irecv = nccl_ucx_rma_irecv_v8,
   .iflush = nccl_ucx_rma_iflush,
   .test = nccl_ucx_rma_test,
   .closeSend = nccl_ucx_rma_close_send,

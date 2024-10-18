@@ -15,24 +15,32 @@
 #include "p2p_plugin.h"
 
 #ifdef HAVE_UCX_PLUGIN
+extern ncclNet_v9_t ucxPlugin_v9;
 extern ncclNet_v8_t ucxPlugin_v8;
 extern ncclNet_v7_t ucxPlugin_v7;
 extern ncclNet_v6_t ucxPlugin_v6;
 extern ncclNet_v5_t ucxPlugin_v5;
+
+extern ncclNet_v9_t ucxRmaPlugin_v9;
 extern ncclNet_v8_t ucxRmaPlugin_v8;
 extern ncclNet_v7_t ucxRmaPlugin_v7;
 extern ncclNet_v6_t ucxRmaPlugin_v6;
 extern ncclNet_v5_t ucxRmaPlugin_v5;
+
+extern ncclNet_v9_t ucxUctPlugin_v9;
 extern ncclNet_v8_t ucxUctPlugin_v8;
 extern ncclNet_v7_t ucxUctPlugin_v7;
 extern ncclNet_v6_t ucxUctPlugin_v6;
 extern ncclNet_v5_t ucxUctPlugin_v5;
+
+extern ncclNet_v9_t ucxUctRdPlugin_v9;
 extern ncclNet_v8_t ucxUctRdPlugin_v8;
 extern ncclNet_v7_t ucxUctRdPlugin_v7;
 extern ncclNet_v6_t ucxUctRdPlugin_v6;
 extern ncclNet_v5_t ucxUctRdPlugin_v5;
 #endif
 
+extern ncclNet_v9_t ibPlugin_v9;
 extern ncclNet_v8_t ibPlugin_v8;
 extern ncclNet_v7_t ibPlugin_v7;
 extern ncclNet_v6_t ibPlugin_v6;
@@ -40,7 +48,7 @@ extern ncclNet_v5_t ibPlugin_v5;
 pthread_mutex_t nccl_p2p_lock = PTHREAD_MUTEX_INITIALIZER;
 
 ncclDebugLogger_t pluginLogFunction;
-static int ncclNMergedIbDevs = -1;
+
 
 #ifdef HAVE_SHARP_PLUGIN
 extern int ncclNSharpDevs;
@@ -52,10 +60,16 @@ extern int ncclIbRelaxedOrderingEnabled;
 NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
 NCCL_PARAM(IbAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
 
+ncclResult_t pluginInit_v9(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v8(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v7(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v6(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v5(ncclDebugLogger_t logFunction);
+
+ncclNet_v9_t ncclNetPlugin_v9 = {
+  "NCCL RDMA Plugin v9",
+  pluginInit_v9,
+};
 
 ncclNet_v8_t ncclNetPlugin_v8 = {
   "NCCL RDMA Plugin v8",
@@ -109,24 +123,28 @@ static void pluginSetup()
   switch (p2p_plugin) {
 #ifdef HAVE_UCX_PLUGIN
     case NCCL_P2P_UCX:
+      ncclNetPlugin_v9 = ucxPlugin_v9;
       ncclNetPlugin_v8 = ucxPlugin_v8;
       ncclNetPlugin_v7 = ucxPlugin_v7;
       ncclNetPlugin_v6 = ucxPlugin_v6;
       ncclNetPlugin_v5 = ucxPlugin_v5;
       break;
     case NCCL_P2P_UCX_RMA:
+      ncclNetPlugin_v9 = ucxRmaPlugin_v9;
       ncclNetPlugin_v8 = ucxRmaPlugin_v8;
       ncclNetPlugin_v7 = ucxRmaPlugin_v7;
       ncclNetPlugin_v6 = ucxRmaPlugin_v6;
       ncclNetPlugin_v5 = ucxRmaPlugin_v5;
       break;
     case NCCL_P2P_UCX_UCT:
+      ncclNetPlugin_v9 = ucxUctPlugin_v9;
       ncclNetPlugin_v8 = ucxUctPlugin_v8;
       ncclNetPlugin_v7 = ucxUctPlugin_v7;
       ncclNetPlugin_v6 = ucxUctPlugin_v6;
       ncclNetPlugin_v5 = ucxUctPlugin_v5;
       break;
     case NCCL_P2P_UCX_UCT_RD:
+      ncclNetPlugin_v9 = ucxUctRdPlugin_v9;
       ncclNetPlugin_v8 = ucxUctRdPlugin_v8;
       ncclNetPlugin_v7 = ucxUctRdPlugin_v7;
       ncclNetPlugin_v6 = ucxUctRdPlugin_v6;
@@ -134,6 +152,7 @@ static void pluginSetup()
       break;
 #endif
     default:
+      ncclNetPlugin_v9 = ibPlugin_v9;
       ncclNetPlugin_v8 = ibPlugin_v8;
       ncclNetPlugin_v7 = ibPlugin_v7;
       ncclNetPlugin_v6 = ibPlugin_v6;
@@ -142,6 +161,14 @@ static void pluginSetup()
   }
 
 }
+
+ncclResult_t pluginInit_v9(ncclDebugLogger_t logFunction) {
+  pluginLogFunction = logFunction;
+  pluginSetup();
+  INFO(NCCL_INIT|NCCL_NET, "P2P plugin v9 %s", ncclNetPlugin_v9.name);
+  return ncclNetPlugin_v9.init(logFunction);
+}
+
 
 ncclResult_t pluginInit_v8(ncclDebugLogger_t logFunction) {
   pluginLogFunction = logFunction;
@@ -196,27 +223,25 @@ ncclResult_t nccl_p2p_gdr_support()
 static __thread int ibDmaSupportInitDev; // which device to init, must be thread local
 static void ibDmaBufSupportInitOnce(){
   ncclResult_t res;
-  // select the appropriate
-  struct ncclIbMergedDev* mergedDev = ncclIbMergedDevs + ibDmaSupportInitDev;
-  // Test each real devices
   int dev_fail = 0;
-  for (int i = 0; i < mergedDev->ndevs; i++) {
-    int ibDev = mergedDev->devs[i];
-    struct ibv_pd* pd;
-    struct ibv_context* ctx = ncclIbDevs[ibDev].context;
-    NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
-    // Test kernel DMA-BUF support with a dummy call (fd=-1)
-    (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
-    // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
-    dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
-    NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
-    // stop the search and goto failure
-    if (dev_fail) goto failure;
-  }
-  mergedDev->dmaBufSupported = 1;
+
+  // This is a physical device, not a virtual one, so select from ibDevs
+  ncclIbMergedDev* mergedDev = ncclIbMergedDevs + ibDmaSupportInitDev;
+  ncclIbDev* ibDev = ncclIbDevs + mergedDev->vProps.devs[0];
+  struct ibv_pd* pd;
+  struct ibv_context* ctx = ibDev->context;
+  NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
+  // Test kernel DMA-BUF support with a dummy call (fd=-1)
+  (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
+  // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
+  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
+  NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
+  // stop the search and goto failure
+  if (dev_fail) goto failure;
+  ibDev->dmaBufSupported = 1;
   return;
 failure:
-  mergedDev->dmaBufSupported = -1;
+  ibDev->dmaBufSupported = -1;
   return;
 }
 
@@ -233,33 +258,31 @@ ncclResult_t nccl_p2p_dmabuf_support(int dev) {
   // init the device only once
   ibDmaSupportInitDev = dev;
   pthread_once(&onces[dev].once, ibDmaBufSupportInitOnce);
-
-  int dmaBufSupported = ncclIbMergedDevs[dev].dmaBufSupported;
+  ncclIbMergedDev* mergedDev = ncclIbMergedDevs + ibDmaSupportInitDev;
+  ncclIbDev* ibDev = ncclIbDevs + mergedDev->vProps.devs[0];
+  int dmaBufSupported = ibDev->dmaBufSupported;
   if (dmaBufSupported == 1) return ncclSuccess;
   return ncclSystemError;
 }
 
-ncclResult_t nccl_p2p_ib_get_properties(ncclIbDev *devs, int dev, ncclNetProperties_t* props)
-{
-  struct ncclIbMergedDev* mergedDev = ncclIbMergedDevs+dev;
-  props->name = mergedDev->devName;
-  props->speed = mergedDev->speed;
-
-  // Take the rest of the properties from an arbitrary sub-device (should be the same)
-  struct ncclIbDev* ibDev = ncclIbDevs + mergedDev->devs[0];
+ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
+  struct ncclIbDev* ibDev = ncclIbDevs + dev;
+  pthread_mutex_lock(&ibDev->lock);
+  props->name = ibDev->devName;
+  props->speed = ibDev->speed;
   props->pciPath = ibDev->pciPath;
   props->guid = ibDev->guid;
-
   props->ptrSupport   = NCCL_PTR_HOST;
   if (nccl_p2p_gdr_support() == ncclSuccess) {
     props->ptrSupport |= NCCL_PTR_CUDA; // GDR support via nv_peermem
-    INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (nvidia-peermem) enabled for HCA %d '%s", dev, devs[dev].devName);
+    INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (nvidia-peermem) enabled for HCA %d '%s", dev, ibDev->devName);
   }
   props->regIsGlobal = 1;
+  props->forceFlush = 0;
   if ((nccl_p2p_is_uct_plugin(p2p_plugin) || (p2p_plugin == NCCL_P2P_IB)) &&
       nccl_p2p_dmabuf_support(dev) == ncclSuccess) {
     props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
-    INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (DMABUF) enabled for HCA %d '%s", dev, devs[dev].devName);
+    INFO(NCCL_NET,"NET/IB : GPU Direct RDMA (DMABUF) enabled for HCA %d '%s", dev, ibDev->devName);
   }
 
   props->latency      = 0; // Not set
@@ -272,9 +295,25 @@ ncclResult_t nccl_p2p_ib_get_properties(ncclIbDev *devs, int dev, ncclNetPropert
   } else {
     props->maxRecvs = 1;
   }
-  props->netDeviceType    = NCCL_NET_DEVICE_HOST;
+  props->netDeviceType = NCCL_NET_DEVICE_HOST;
   props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
+  props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
+  pthread_mutex_unlock(&ibDev->lock);
+  return ncclSuccess;
+}
 
+ncclResult_t nccl_p2p_ib_get_properties(ncclIbDev *devs, int ncclNMergedIbDevs, int dev, ncclNetProperties_t* props)
+{
+  if (dev >= ncclNMergedIbDevs) {
+    WARN("NET/IB : Requested properties for vNic %d, only %d vNics have been created", dev, ncclNMergedIbDevs);
+    return ncclInvalidUsage;
+  }
+  struct ncclIbMergedDev* mergedDev = ncclIbMergedDevs + dev;
+  // Take the rest of the properties from an arbitrary sub-device (should be the same)
+  NCCLCHECK(ncclIbGetPhysProperties(mergedDev->vProps.devs[0], props));
+  props->name = mergedDev->devName;
+  props->speed = mergedDev->speed;
+  memcpy(&props->vProps, &mergedDev->vProps, sizeof(ncclNetVDeviceProps_t));
   return ncclSuccess;
 }
 
@@ -364,29 +403,63 @@ int devSharpCompare(const void *a, const void *b)
   else { return 1; }
 }
 
-// Compare ncclIbDev[dev] to all stored mergedIbDevs
-int ncclIbFindMatchingDev(int dev) {
-  for (int i = 0; i < ncclNMergedIbDevs; i++) {
-    if (ncclIbMergedDevs[i].ndevs < NCCL_IB_MAX_DEVS_PER_NIC) {
-      int compareDev = ncclIbMergedDevs[i].devs[0];
-      if (strcmp(ncclIbDevs[dev].pciPath, ncclIbDevs[compareDev].pciPath) == 0 &&
-          (ncclIbDevs[dev].guid == ncclIbDevs[compareDev].guid) &&
-          (ncclIbDevs[dev].link == ncclIbDevs[compareDev].link)) {
-          TRACE(NCCL_NET, "NET/IB: Matched name1=%s pciPath1=%s guid1=0x%lx link1=%u name2=%s pciPath2=%s guid2=0x%lx link2=%u",
-            ncclIbDevs[dev].devName, ncclIbDevs[dev].pciPath, ncclIbDevs[dev].guid, ncclIbDevs[dev].link,
-            ncclIbDevs[compareDev].devName, ncclIbDevs[compareDev].pciPath, ncclIbDevs[compareDev].guid, ncclIbDevs[compareDev].link);
-          return i;
-      }
+ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props, int ncclNIbDevs, int *ncclNMergedIbDevs, int disableMergeDevices) {
+  if ((ncclParamIbMergeNics() == 0 || disableMergeDevices) && props->ndevs > 1) {
+    WARN("NET/IB : Trying to merge multiple devices together when NCCL_IB_MERGE_NICS=0. Please enable it or disable device merging in NCCL.");
+    return ncclInvalidUsage;
+  }
+
+  if (*ncclNMergedIbDevs == MAX_IB_VDEVS) {
+    WARN("NET/IB : Cannot allocate any more virtual devices (%d)", MAX_IB_VDEVS);
+    return ncclInvalidUsage;
+  }
+
+  // Always count up number of merged devices
+  ncclIbMergedDev* mDev = ncclIbMergedDevs + *ncclNMergedIbDevs;
+  mDev->vProps.ndevs = 0;
+  mDev->speed = 0;
+
+  for (int i = 0; i < props->ndevs; i++) {
+    ncclIbDev* dev = ncclIbDevs + props->devs[i];
+    if (mDev->vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
+    mDev->vProps.devs[mDev->vProps.ndevs++] = props->devs[i];
+    mDev->speed += dev->speed;
+    // Each successive time, copy the name '+' new name
+    if (mDev->vProps.ndevs > 1) {
+      snprintf(mDev->devName + strlen(mDev->devName), sizeof(mDev->devName) - strlen(mDev->devName), "+%s", dev->devName);
+    // First time, copy the plain name
+    } else {
+      strncpy(mDev->devName, dev->devName, MAXNAMESIZE);
+     }
+   }
+
+  // Check link layers
+  ncclIbDev* dev0 = ncclIbDevs + props->devs[0];
+  for (int i = 1; i < props->ndevs; i++) {
+    if (props->devs[i] >= ncclNIbDevs) {
+      WARN("NET/IB : Cannot use physical device %d, max %d", props->devs[i], ncclNIbDevs);
+      return ncclInvalidUsage;
+    }
+    ncclIbDev* dev = ncclIbDevs + props->devs[i];
+    if (dev->link != dev0->link) {
+      WARN("NET/IB : Trying to merge multiple devices together with different link_layer properties %s -> %d, %s -> %d. Try only selecting NICs with one type of link using NCCL_IB_HCA",
+        dev0->devName, dev0->link, dev->devName, dev->link);
+      return ncclInvalidUsage;
     }
   }
 
-  return ncclNMergedIbDevs;
+  *d = *ncclNMergedIbDevs;
+  (*ncclNMergedIbDevs)++;
+
+  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, mDev->devName, mDev->speed, mDev->vProps.ndevs);
+  return ncclSuccess;
 }
 
-ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIbIfName, union ncclSocketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction)
+ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, char *ncclIbIfName, union ncclSocketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction, int disableMergeDevices)
 {
-  int ncclNIbDevs = *num_devs;
   ncclResult_t ret = ncclSuccess;
+  int ncclNIbDevs = *nDevs;
+  int ncclNMergedIbDevs = *nmDevs;
   pluginLogFunction = logFunction;
   if (ncclNIbDevs == -1) {
     for (int i=0; i< MAX_IB_DEVS; i++)
@@ -416,11 +489,7 @@ ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIb
       int nUserIfs = parseStringList(userIbEnv, userIfs, MAX_IB_DEVS);
 
       if (ncclSuccess != wrap_ibv_get_device_list(&devices, &nIbDevs)) { ret = ncclInternalError; goto fail; }
-      // Should NCCL merge multi-port devices into one?
-      int mergeNics;
-      mergeNics = ncclParamIbMergeNics();
-build_ib_list:
-      for (int d=0; d<nIbDevs; d++) {
+      for (int d=0; d<nIbDevs && ncclNIbDevs<MAX_IB_DEVS; d++) {
         struct ibv_context * context;
         if (ncclSuccess != wrap_ibv_open_device(&context, devices[d]) || context == NULL) {
           WARN("NET/IB : Unable to open device %s", devices[d]->name);
@@ -485,94 +554,45 @@ build_ib_list:
             PTHREADCHECKGOTO(pthread_detach(*ncclIbAsyncThread), "pthread_detach", ret, fail); // will not be pthread_join()'d
           }
 
-          int mergedDev = ncclNMergedIbDevs;
-          if (mergeNics) {
-            mergedDev = ncclIbFindMatchingDev(ncclNIbDevs);
-          }
+          // Add this plain physical device to the list of virtual devices
+          int vDev;
+          ncclNetVDeviceProps_t vProps = {0};
+          vProps.ndevs = 1;
+          vProps.devs[0] = ncclNIbDevs;
+          NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps, ncclNIbDevs, &ncclNMergedIbDevs, disableMergeDevices));
 
-          // No matching dev found, create new mergedDev entry (it's okay if there's only one dev inside)
-          if (mergedDev == ncclNMergedIbDevs) {
-            // Set ndevs to 1, assign first ibDevN to the current IB device
-            ncclIbMergedDevs[mergedDev].ndevs = 1;
-            ncclIbMergedDevs[mergedDev].devs[0] = ncclNIbDevs;
-            ncclNMergedIbDevs++;
-            strncpy(ncclIbMergedDevs[mergedDev].devName, ncclIbDevs[ncclNIbDevs].devName, MAXNAMESIZE);
-          // Matching dev found, edit name
-          } else {
-            // Set next device in this array to the current IB device
-            int ndevs = ncclIbMergedDevs[mergedDev].ndevs;
-            ncclIbMergedDevs[mergedDev].devs[ndevs] = ncclNIbDevs;
-            ncclIbMergedDevs[mergedDev].ndevs++;
-            snprintf(ncclIbMergedDevs[mergedDev].devName + strlen(ncclIbMergedDevs[mergedDev].devName), MAXNAMESIZE+1, "+%s", ncclIbDevs[ncclNIbDevs].devName);
-          }
-
-          // Aggregate speed
-          ncclIbMergedDevs[mergedDev].speed += ncclIbDevs[ncclNIbDevs].speed;
           ncclNIbDevs++;
           nPorts++;
         }
         if (nPorts == 0 && ncclSuccess != wrap_ibv_close_device(context))  { ret = ncclInternalError; goto fail; }
       }
       
-      // Detect if there are both multi-port and single-port NICs in the system. If so, disable port merging and build the list again
-      if (mergeNics) {
-        for (int d = 0; d < ncclNMergedIbDevs; d++) {
-          if (ncclIbMergedDevs[d].ndevs != ncclIbMergedDevs[0].ndevs) {
-            INFO(NCCL_NET, "Detected a mix of single and multiple-port NICs. Force-disabling NCCL_IB_MERGE_NICS");
-            mergeNics = 0;
-            ncclNIbDevs = 0;
-            ncclNMergedIbDevs = 0;
-            memset(ncclIbMergedDevs, 0, sizeof(ncclIbMergedDevs));
-            goto build_ib_list;
-          }
-        }
-      }
-
       if (nIbDevs && (ncclSuccess != wrap_ibv_free_device_list(devices))) { ret = ncclInternalError; goto fail; };
     }
     if (ncclNIbDevs == 0) {
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : No device found.");
-    } else {
-      // sort devices on sharp capable
-      if (ncclNSharpDevs && (ncclNSharpDevs != ncclNIbDevs)) {
-        qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), devSharpCompare);
-      }
-
-      char line[2048];
-      line[0] = '\0';
-      // Determine whether RELAXED_ORDERING is enabled and possible
-      ncclIbRelaxedOrderingEnabled = ncclIbRelaxedOrderingCapable();
-      for (int d = 0; d < ncclNMergedIbDevs; d++) {
-        struct ncclIbMergedDev* mergedDev = ncclIbMergedDevs + d;
-        if (mergedDev->ndevs > 1) {
-          // Print out merged dev info
-          snprintf(line+strlen(line), 2047-strlen(line), " [%d]={", d);
-          for (int i = 0; i < mergedDev->ndevs; i++) {
-            int ibDev = mergedDev->devs[i];
-            snprintf(line+strlen(line), 2047-strlen(line), "[%d] %s:%d/%s%s", ibDev, ncclIbDevs[ibDev].devName,
-              ncclIbDevs[ibDev].portNum, ncclIbDevs[ibDev].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE",
-              // Insert comma to delineate
-              i == (mergedDev->ndevs - 1) ? "" : ", ");
-          }
-          snprintf(line+strlen(line), 2047-strlen(line), "}");
-        } else {
-          int ibDev = mergedDev->devs[0];
-#ifdef HAVE_SHARP_PLUGIN
-          snprintf(line+strlen(line), 2047-strlen(line), " [%d]%s:%d/%s%s", ibDev, ncclIbDevs[ibDev].devName,
-            ncclIbDevs[ibDev].portNum, ncclIbDevs[ibDev].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE",
-            ncclIbDevs[ibDev].isSharpDev ? "/SHARP" : "");
-#else
-          snprintf(line+strlen(line), 2047-strlen(line), " [%d]%s:%d/%s", ibDev, ncclIbDevs[ibDev].devName,
-            ncclIbDevs[ibDev].portNum, ncclIbDevs[ibDev].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
-#endif
-        }
-      }
-      line[2047] = '\0';
-      char addrline[SOCKET_NAME_MAXLEN+1];
-      INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
-           ncclIbIfName, ncclSocketToString(ncclIbIfAddr, addrline, 1));
     }
-    *num_devs = ncclNMergedIbDevs;
+
+    // Print out all net devices to the user (in the same format as before)
+    char line[2048];
+    line[0] = '\0';
+    // Determine whether RELAXED_ORDERING is enabled and possible
+    ncclIbRelaxedOrderingEnabled = ncclIbRelaxedOrderingCapable();
+    for (int d = 0; d < ncclNIbDevs; d++) {
+#ifdef HAVE_SHARP_PLUGIN
+            snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s%s", d, ncclIbDevs[d].devName,
+              ncclIbDevs[d].portNum, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE",
+              ncclIbDevs[d].isSharpDev ? "/SHARP" : "");
+#else
+      snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
+        ncclIbDevs[d].portNum, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
+#endif
+    }
+    char addrline[SOCKET_NAME_MAXLEN+1];
+    INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
+      ncclIbIfName, ncclSocketToString(ncclIbIfAddr, addrline, 1));
+    *nDevs = ncclNIbDevs;
+    *nmDevs = ncclNMergedIbDevs;
     pthread_mutex_unlock(&nccl_p2p_lock);
   }
 exit:
@@ -580,6 +600,16 @@ exit:
 fail:
   pthread_mutex_unlock(&nccl_p2p_lock);
   goto exit;
+}
+
+// Returns 0 if this is the path of two VFs of the same physical device
+static int ncclIbMatchVfPath(char* path1, char* path2) {
+  // Merge multi-port NICs into the same PCI device
+  if (ncclParamIbMergeVfs()) {
+    return strncmp(path1, path2, strlen(path1)-4) == 0;
+  } else {
+    return strncmp(path1, path2, strlen(path1)-1) == 0;
+  }
 }
 
 ncclResult_t nccl_p2p_ib_pci_path(ncclIbDev *devs, int num_devs, char* dev_name, char** path, int* real_port)
@@ -590,14 +620,10 @@ ncclResult_t nccl_p2p_ib_pci_path(ncclIbDev *devs, int num_devs, char* dev_name,
   if (p == NULL) {
     WARN("Could not find real path of %s", *device_path);
   } else {
-    // Merge multi-port NICs into the same PCI device
-    p[strlen(p)-1] = '0';
-    // Also merge virtual functions (VF) into the same device
-    if (ncclParamIbMergeVfs()) p[strlen(p)-3] = p[strlen(p)-4] = '0';
-    // And keep the real port aside (the ibv port is always 1 on recent cards)
+    // Keep the real port aside (the ibv port is always 1 on recent cards)
     *real_port = 0;
     for (int d=0; d<num_devs; d++) {
-      if (strcmp(p, devs[d].pciPath) == 0) (*real_port)++;
+      if (ncclIbMatchVfPath(p, ncclIbDevs[d].pciPath)) (*real_port)++;
     }
   }
   *path = p;
@@ -640,4 +666,4 @@ nccl_p2p_plugin_t nccl_p2p_get_plugin_type()
 
 struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
 struct ncclIbDev userIbDevs[MAX_IB_DEVS];
-struct ncclIbMergedDev ncclIbMergedDevs[MAX_IB_DEVS];
+struct ncclIbMergedDev ncclIbMergedDevs[MAX_IB_VDEVS];

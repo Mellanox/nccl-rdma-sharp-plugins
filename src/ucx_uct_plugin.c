@@ -107,7 +107,7 @@ static size_t nccl_uct_rdesc_size(int n) {
 
 /* Prepare a receive descriptor from irecv()/iflush() side */
 static void nccl_uct_rdesc_set(nccl_uct_rdesc_t *rdesc, uint64_t id, int n,
-                               void **data, int *sizes, int *tags,
+                               void **data, size_t *sizes, int *tags,
                                nccl_uct_memh_t **uct_memh) {
   nccl_uct_rdesc_hdr_t *desc = &rdesc->desc;
   int i;
@@ -238,8 +238,8 @@ static ncclResult_t nccl_uct_wr_init(ncclDebugLogger_t logFunction) {
   context.am_short_size  = nccl_uct_rdesc_size(NCCL_UCX_UCT_MAX_RECVS);
   context.rkey_size      = sizeof(((nccl_uct_chunk_t*)0)->rkey);
 
-  return nccl_p2p_ib_init(&context.dev_count, ncclIbDevs, context.if_name,
-                          &context.if_addr, NULL, logFunction);
+  return nccl_p2p_ib_init(&context.dev_count, &context.merge_dev_count, ncclIbDevs, context.if_name,
+                          &context.if_addr, NULL, logFunction, 1);
 }
 
 /* Outcome is either send_atp equal to 1 or 0 */
@@ -315,7 +315,7 @@ static ncclResult_t nccl_uct_send(nccl_uct_wr_comm_t *comm, void *data,
   return ncclSuccess;
 }
 
-static ncclResult_t nccl_uct_wr_isend(void *send_comm, void *data, int size,
+static ncclResult_t nccl_uct_wr_isend(void *send_comm, void *data, size_t size,
                                       int tag, void *mhandle, void **request) {
   nccl_uct_wr_comm_t *comm = nccl_uct_wr_comm_get(send_comm);
   nccl_uct_rdesc_t *rdesc;
@@ -338,8 +338,14 @@ static ncclResult_t nccl_uct_wr_isend(void *send_comm, void *data, int size,
   return ncclSuccess;
 }
 
+static ncclResult_t nccl_uct_wr_isend_v8(void *send_comm, void *data, int size,
+                                      int tag, void *mhandle, void **request) {
+  return nccl_uct_wr_isend(send_comm, data, (size_t)size, tag, mhandle, request);
+}
+
+
 static ncclResult_t nccl_uct_wr_irecv(void *recv_comm, int n, void **data,
-                                      int *sizes, int *tags, void **mhandles,
+                                      size_t *sizes, int *tags, void **mhandles,
                                       void **request) {
   nccl_uct_wr_comm_t *comm   = nccl_uct_wr_comm_get(recv_comm);
   nccl_uct_memh_t **uct_memh = (nccl_uct_memh_t**)mhandles;
@@ -367,6 +373,14 @@ static ncclResult_t nccl_uct_wr_irecv(void *recv_comm, int n, void **data,
   }
 
   return ncclSuccess;
+}
+
+static ncclResult_t nccl_uct_wr_irecv_v8(void *recv_comm, int n, void **data,
+                                      int *sizes, int *tags, void **mhandles,
+                                      void **request) {
+  size_t sizes_sizet[NCCL_NET_IB_MAX_RECVS];
+  for (int i=0; i<n; i++) sizes_sizet[i] = sizes[i];
+  return nccl_uct_wr_irecv(recv_comm, n, data, sizes_sizet, tags, mhandles, request);
 }
 
 static ncclResult_t nccl_uct_wr_iflush(void *recv_comm, int n, void **data,
@@ -468,6 +482,7 @@ static ncclResult_t nccl_uct_wr_close(void *close_comm) {
   return ncclSuccess;
 }
 
+ncclNet_v9_t ucxUctPlugin_v9 = NCCL_UCT_PLUGIN_V9("UCX-UCT", nccl_uct_wr);
 ncclNet_v8_t ucxUctPlugin_v8 = NCCL_UCT_PLUGIN_V8("UCX-UCT", nccl_uct_wr);
 ncclNet_v7_t ucxUctPlugin_v7 = NCCL_UCT_PLUGIN_V7("UCX-UCT", nccl_uct_wr);
 ncclNet_v6_t ucxUctPlugin_v6 = NCCL_UCT_PLUGIN_V6("UCX-UCT", nccl_uct_wr);

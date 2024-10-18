@@ -13,6 +13,9 @@
 #define NCCL_IBVWRAP_H_
 #include "config.h"
 #include "core.h"
+#include "utils.h"
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <infiniband/verbs.h>
 
 #if !HAVE_DECL_IBV_ACCESS_RELAXED_ORDERING
@@ -81,5 +84,15 @@ ncclResult_t wrap_ibv_set_ece(struct ibv_qp *qp, struct ibv_ece *ece, int* suppo
 ncclResult_t wrap_ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr);
 ncclResult_t wrap_ibv_post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr);
 ncclResult_t wrap_ibv_event_type_str(char **ret, enum ibv_event_type event);
+
+// converts a GID into a readable string. On success, returns a non-null pointer to gidStr.
+// NULL is returned if there was an error, with errno set to indicate the error.
+// errno = ENOSPC if the converted string would exceed strLen.
+static inline const char* ibvGetGidStr(union ibv_gid* gid, char* gidStr, size_t strLen) {
+  // GID is a 16B handle, to convert it to a readable form, we use inet_ntop
+  // sizeof(ibv_gid) == sizeof(struct in6_addr), so using AF_INET6
+  NCCL_STATIC_ASSERT(sizeof(union ibv_gid) == sizeof(struct in6_addr), "the sizeof struct ibv_gid must be the size of struct in6_addr");
+  return inet_ntop(AF_INET6, gid->raw, gidStr, strLen);
+}
 
 #endif //End include guard

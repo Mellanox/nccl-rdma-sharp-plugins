@@ -235,8 +235,8 @@ static ncclResult_t nccl_uct_rd_init(ncclDebugLogger_t logFunction) {
     context.am_short_size = sizeof(nccl_uct_mem_t);
   }
 
-  return nccl_p2p_ib_init(&context.dev_count, ncclIbDevs, context.if_name,
-                          &context.if_addr, NULL, logFunction);
+  return nccl_p2p_ib_init(&context.dev_count, &context.merge_dev_count, ncclIbDevs, context.if_name,
+                          &context.if_addr, NULL, logFunction, 1);
 }
 
 static nccl_uct_rd_req_t *nccl_uct_rd_req_alloc(nccl_uct_rd_comm_t *comm,
@@ -266,7 +266,7 @@ static inline void nccl_uct_rd_req_free(nccl_uct_rd_req_t *req) {
   req->comm->req_count--;
 }
 
-static ncclResult_t nccl_uct_rd_isend(void *send_comm, void *data, int size,
+static ncclResult_t nccl_uct_rd_isend(void *send_comm, void *data, size_t size,
                                       int tag, void *mhandle, void **request) {
 
   nccl_uct_rd_comm_t *comm  = nccl_uct_rd_comm_get(send_comm);
@@ -302,8 +302,13 @@ static ncclResult_t nccl_uct_rd_isend(void *send_comm, void *data, int size,
   return ncclSuccess;
 }
 
+static ncclResult_t nccl_uct_rd_isend_v8(void *send_comm, void *data, int size,
+                                      int tag, void *mhandle, void **request) {
+  return nccl_uct_rd_isend(send_comm, data, (size_t)size, tag, mhandle, request);
+}
+
 static ncclResult_t nccl_uct_rd_irecv(void *recv_comm, int n, void **data,
-                                      int *sizes, int *tags, void **mhandles,
+                                      size_t *sizes, int *tags, void **mhandles,
                                       void **request) {
   nccl_uct_rd_comm_t *comm   = nccl_uct_rd_comm_get(recv_comm);
   nccl_uct_memh_t **uct_memh = (nccl_uct_memh_t**)mhandles;
@@ -346,6 +351,14 @@ static ncclResult_t nccl_uct_rd_irecv(void *recv_comm, int n, void **data,
   }
 
   return ncclSuccess;
+}
+
+static ncclResult_t nccl_uct_rd_irecv_v8(void *recv_comm, int n, void **data,
+                                      int *sizes, int *tags, void **mhandles,
+                                      void **request) {
+  size_t sizes_sizet[NCCL_NET_IB_MAX_RECVS];
+  for (int i=0; i<n; i++) sizes_sizet[i] = sizes[i];
+  return nccl_uct_rd_irecv(recv_comm, n, data, sizes_sizet, tags, mhandles, request);
 }
 
 static ncclResult_t nccl_uct_rd_iflush(void *recv_comm, int n, void **data,
@@ -426,6 +439,7 @@ static ncclResult_t nccl_uct_rd_close(void *close_comm) {
   return ncclSuccess;
 }
 
+ncclNet_v9_t ucxUctRdPlugin_v9 = NCCL_UCT_PLUGIN_V9("UCX-UCT-RD", nccl_uct_rd);
 ncclNet_v8_t ucxUctRdPlugin_v8 = NCCL_UCT_PLUGIN_V8("UCX-UCT-RD", nccl_uct_rd);
 ncclNet_v7_t ucxUctRdPlugin_v7 = NCCL_UCT_PLUGIN_V7("UCX-UCT-RD", nccl_uct_rd);
 ncclNet_v6_t ucxUctRdPlugin_v6 = NCCL_UCT_PLUGIN_V6("UCX-UCT-RD", nccl_uct_rd);
