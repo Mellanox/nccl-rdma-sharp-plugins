@@ -162,6 +162,7 @@ typedef struct nccl_uct_context {
 
   /* IB devices available */
   int                     dev_count;
+  int                     merge_dev_count;
 
   /* Use by common code to setup communicators */
   struct nccl_uct_ops {
@@ -230,6 +231,8 @@ ncclResult_t nccl_uct_reg_mr(void *reg_comm, void *data, size_t size, int type,
 ncclResult_t nccl_uct_dereg_mr(void *dereg_comm, void *mhandle);
 
 /* Compatibility callback */
+ncclResult_t nccl_uct_get_properties_v8(int dev,
+                                        ncclNetProperties_v8_t *props_v8);
 ncclResult_t nccl_uct_get_properties_v7(int dev,
                                         ncclNetProperties_v7_t *props_v7);
 ncclResult_t nccl_uct_reg_mr_v7(void *comm, void *data, int size, int type,
@@ -242,7 +245,8 @@ ncclResult_t nccl_uct_get_properties(int dev, ncclNetProperties_t *props);
 
 
 #define NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, get_properties_func, \
-                             connect_func, accept_func, reg_mr_func) \
+                             connect_func, accept_func, reg_mr_func, \
+                             isend_func, irecv_func) \
   { \
     .name          = plugin_name, \
     .init          = prefix##_init, \
@@ -254,8 +258,8 @@ ncclResult_t nccl_uct_get_properties(int dev, ncclNetProperties_t *props);
     .regMr         = reg_mr_func, \
     .regMrDmaBuf   = nccl_uct_reg_mr_dmabuf, \
     .deregMr       = nccl_uct_dereg_mr, \
-    .isend         = prefix##_isend, \
-    .irecv         = prefix##_irecv, \
+    .isend         = prefix##_##isend_func, \
+    .irecv         = prefix##_##irecv_func, \
     .iflush        = prefix##_iflush, \
     .test          = prefix##_test, \
     .closeSend     = prefix##_close, \
@@ -263,18 +267,25 @@ ncclResult_t nccl_uct_get_properties(int dev, ncclNetProperties_t *props);
     .closeListen   = nccl_uct_close_listen \
   }
 
-#define NCCL_UCT_PLUGIN_V8(plugin_name, prefix) \
+#define NCCL_UCT_PLUGIN_V9(plugin_name, prefix) \
   NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, nccl_uct_get_properties, \
-                       nccl_uct_connect, nccl_uct_accept, nccl_uct_reg_mr)
+                       nccl_uct_connect, nccl_uct_accept, nccl_uct_reg_mr, \
+                       isend, irecv)
+
+#define NCCL_UCT_PLUGIN_V8(plugin_name, prefix) \
+  NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, nccl_uct_get_properties_v8, \
+                       nccl_uct_connect, nccl_uct_accept, nccl_uct_reg_mr, \
+                       isend_v8, irecv_v8)
 
 #define NCCL_UCT_PLUGIN_V7(plugin_name, prefix) \
   NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, nccl_uct_get_properties_v7, \
-                       nccl_uct_connect, nccl_uct_accept, nccl_uct_reg_mr_v7)
+                       nccl_uct_connect, nccl_uct_accept, nccl_uct_reg_mr_v7, \
+                       isend_v8, irecv_v8)
 
 #define NCCL_UCT_PLUGIN_V6(plugin_name, prefix) \
   NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, nccl_uct_get_properties_v6, \
                        nccl_uct_connect_v6, nccl_uct_accept_v6, \
-                       nccl_uct_reg_mr_v7)
+                       nccl_uct_reg_mr_v7, isend_v8, irecv_v8)
 
 #define NCCL_UCT_PLUGIN_V5(plugin_name, prefix) \
   { \
@@ -287,8 +298,8 @@ ncclResult_t nccl_uct_get_properties(int dev, ncclNetProperties_t *props);
     .accept        = nccl_uct_accept_v6, \
     .regMr         = nccl_uct_reg_mr_v7, \
     .deregMr       = nccl_uct_dereg_mr, \
-    .isend         = prefix##_isend, \
-    .irecv         = prefix##_irecv, \
+    .isend         = prefix##_isend_v8, \
+    .irecv         = prefix##_irecv_v8, \
     .iflush        = prefix##_iflush, \
     .test          = prefix##_test, \
     .closeSend     = prefix##_close, \

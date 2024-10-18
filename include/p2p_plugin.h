@@ -46,15 +46,13 @@ struct ncclIbMrCache {
   int capacity, population;
 };
 
-#define NCCL_IB_MAX_DEVS_PER_NIC 2
+#define NCCL_IB_MAX_DEVS_PER_NIC 4
 #define MAX_MERGED_DEV_NAME (MAXNAMESIZE*NCCL_IB_MAX_DEVS_PER_NIC)+NCCL_IB_MAX_DEVS_PER_NIC
-struct ncclIbMergedDev {
-  int ndevs;
-  int devs[NCCL_IB_MAX_DEVS_PER_NIC]; // Points to an index in ncclIbDevs
+typedef struct ncclIbMergedDev {
+  ncclNetVDeviceProps_t vProps;
   int speed;
   char devName[MAX_MERGED_DEV_NAME]; // Up to NCCL_IB_MAX_DEVS_PER_NIC * name size, and a character for each '+'
-  int dmaBufSupported;               //  0 = uninit, 1 = yes, -1 = no
-} __attribute__((aligned(64)));
+} __attribute__((aligned(64))) ncclIbMergedDev;
 
 struct ncclIbStats {
   int fatalErrorCount;
@@ -108,17 +106,21 @@ typedef struct ncclIbDev {
   struct ibv_pd*  pd;
   char     devName[MAXNAMESIZE];
   char     *pciPath;
+  char* virtualPciPath;
   int      realPort;
   int      maxQp;
+  float latency;
   struct   ncclIbMrCache mrCache;
   int ar; // ADAPTIVE_ROUTING
   struct ibv_port_attr portAttr;
   struct ncclIbStats stats;
+  int dmaBufSupported;
 } __attribute__((aligned(64))) ncclIbDev;
 
 
-#define MAX_IB_DEVS 32
-extern struct ncclIbMergedDev ncclIbMergedDevs[MAX_IB_DEVS];
+#define MAX_IB_DEVS  32
+#define MAX_IB_VDEVS MAX_IB_DEVS*8
+extern struct ncclIbMergedDev ncclIbMergedDevs[MAX_IB_VDEVS];
 extern struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
 /* Detect whether GDR can work on a given NIC with the current CUDA device
  * Returns :
@@ -130,9 +132,10 @@ ncclResult_t nccl_p2p_dmabuf_support(int dev);
 
 ncclResult_t nccl_p2p_ib_pci_path(ncclIbDev *devs, int num_devs, char* dev_name, char** path, int* real_port);
 
-ncclResult_t nccl_p2p_ib_get_properties(ncclIbDev *devs, int dev, ncclNetProperties_t* props);
+ncclResult_t nccl_p2p_ib_get_properties(ncclIbDev *devs, int ncclNMergedIbDevs, int dev, ncclNetProperties_t* props);
 
-ncclResult_t nccl_p2p_ib_init(int *num_devs, ncclIbDev *ncclIbDevs, char *ncclIbIfName, union ncclSocketAddress *ncclIbIfAddr, pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction);
+ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, char *ncclIbIfName, union ncclSocketAddress *ncclIbIfAddr,
+                              pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction);
 
 /* Convert value returtned by ibv_query_port to actual link width */
 int nccl_p2p_ib_width(int width);
@@ -151,5 +154,7 @@ int ncclIbRelaxedOrderingCapable(void);
 nccl_p2p_plugin_t nccl_p2p_get_plugin_type();
 
 ncclResult_t ncclIbStatsInit(struct ncclIbStats* stat);
+
+ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props, int nDevs, int *nmDevs);
 
 #endif
