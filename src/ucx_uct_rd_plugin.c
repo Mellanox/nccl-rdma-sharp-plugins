@@ -236,7 +236,7 @@ static ncclResult_t nccl_uct_rd_init(ncclDebugLogger_t logFunction) {
   }
 
   return nccl_p2p_ib_init(&context.dev_count, &context.merge_dev_count, ncclIbDevs, context.if_name,
-                          &context.if_addr, NULL, logFunction, 1);
+                          &context.if_addr, NULL, logFunction);
 }
 
 static nccl_uct_rd_req_t *nccl_uct_rd_req_alloc(nccl_uct_rd_comm_t *comm,

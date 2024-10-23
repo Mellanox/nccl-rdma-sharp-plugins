@@ -135,7 +135,7 @@ ncclResult_t nccl_p2p_ib_pci_path(ncclIbDev *devs, int num_devs, char* dev_name,
 ncclResult_t nccl_p2p_ib_get_properties(ncclIbDev *devs, int ncclNMergedIbDevs, int dev, ncclNetProperties_t* props);
 
 ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, char *ncclIbIfName, union ncclSocketAddress *ncclIbIfAddr,
-                              pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction, int disableMergeDevices);
+                              pthread_t *ncclIbAsyncThread, ncclDebugLogger_t logFunction);
 
 /* Convert value returtned by ibv_query_port to actual link width */
 int nccl_p2p_ib_width(int width);
@@ -155,6 +155,6 @@ nccl_p2p_plugin_t nccl_p2p_get_plugin_type();
 
 ncclResult_t ncclIbStatsInit(struct ncclIbStats* stat);
 
-ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props, int nDevs, int *nmDevs, int disanleMergeDevices);
+ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props, int nDevs, int *nmDevs);
 
 #endif

@@ -492,7 +492,7 @@ ncclResult_t nccl_ucx_init(ncclDebugLogger_t logFunction) {
   }
 
   return nccl_p2p_ib_init(&ncclNIbDevs, &ncclNMergedIbDevs, ncclIbDevs, if_name,
-                          &nccl_ucx_if_addr, NULL, logFunction, 1);
+                          &nccl_ucx_if_addr, NULL, logFunction);
 }
 
 ncclResult_t nccl_ucx_listen(int dev, void *handle, void **listen_comm) {

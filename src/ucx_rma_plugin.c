@@ -408,7 +408,7 @@ ncclResult_t nccl_ucx_rma_init(ncclDebugLogger_t logFunction)
   char *config_env;
   if (ncclParamUCXRMADisable()) return ncclInternalError;
   NCCLCHECK(nccl_p2p_ib_init(&ncclNIbDevs, &ncclNMergedIbDevs, ncclIbDevs, if_name, &nccl_ucx_if_addr,
-                          NULL, logFunction, 1));
+                          NULL, logFunction));
 
   if (strlen(nccl_ucx_rma_tls) == 0) {
     config_env = getenv("NCCL_UCX_TLS");

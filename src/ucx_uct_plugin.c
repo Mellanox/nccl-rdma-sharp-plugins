@@ -239,7 +239,7 @@ static ncclResult_t nccl_uct_wr_init(ncclDebugLogger_t logFunction) {
   context.rkey_size      = sizeof(((nccl_uct_chunk_t*)0)->rkey);
 
   return nccl_p2p_ib_init(&context.dev_count, &context.merge_dev_count, ncclIbDevs, context.if_name,
-                          &context.if_addr, NULL, logFunction, 1);
+                          &context.if_addr, NULL, logFunction);
 }
 
 /* Outcome is either send_atp equal to 1 or 0 */

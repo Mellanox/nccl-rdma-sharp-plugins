@@ -581,7 +581,7 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
   NCCL_STATIC_ASSERT((offsetof(struct ncclIbRecvComm, remFifo) % 32) == 0, "ncclIbSendComm fifo must be 32-byte aligned");
 
 
-  return nccl_p2p_ib_init(&ncclNIbDevs, &ncclNMergedIbDevs, ncclIbDevs, ncclIbIfName, &ncclIbIfAddr, &ncclIbAsyncThread, logFunction, 0);
+  return nccl_p2p_ib_init(&ncclNIbDevs, &ncclNMergedIbDevs, ncclIbDevs, ncclIbIfName, &ncclIbIfAddr, &ncclIbAsyncThread, logFunction);
 }
 
 NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
@@ -1974,7 +1974,7 @@ ncclResult_t ncclIbCloseListen(void* listenComm) {
 
 ncclResult_t ncclIbMakeVDevice(int* d, ncclNetVDeviceProps_t* props) {
   pthread_mutex_lock(&ncclIbLock);
-  ncclResult_t res = ncclIbMakeVDeviceInternal(d, props, ncclNIbDevs, &ncclNMergedIbDevs, 1);
+  ncclResult_t res = ncclIbMakeVDeviceInternal(d, props, ncclNIbDevs, &ncclNMergedIbDevs);
   pthread_mutex_unlock(&ncclIbLock);
   return res;
 }
