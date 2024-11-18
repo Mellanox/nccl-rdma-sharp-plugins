@@ -916,8 +916,7 @@ static ncclResult_t nccl_ucp_send(nccl_ucp_comm_t *comm, unsigned short id,
 
   status_ptr =
       ucp_put_nbx(comm->ucp_ep, data, size, rtr->chunk[i].data, rkey, &param);
-  if ((UCS_PTR_STATUS(status_ptr) != UCS_INPROGRESS) &&
-      (UCS_PTR_STATUS(status_ptr) != UCS_OK)) {
+  if (UCS_PTR_IS_ERR(status_ptr)) {
     return ncclSuccess;
   }
 
