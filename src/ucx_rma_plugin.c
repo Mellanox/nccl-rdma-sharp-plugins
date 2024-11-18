@@ -23,8 +23,8 @@
   }                                                  \
 } while(0)
 
-NCCL_PARAM(UCXAckDelay, "UCXPUT_ACK_DELAY", 1);
-NCCL_PARAM(UCXAckSkip, "UCXPUT_ACK_SKIP", 0);
+NCCL_PARAM(UCXAckDelay, "UCX_PUT_ACK_DELAY", 1);
+NCCL_PARAM(UCXAckSkip, "UCX_PUT_ACK_SKIP", 0);
 
 typedef enum {
   NCCL_UCP_TYPE_IRECV,
@@ -124,15 +124,13 @@ typedef struct nccl_ucp_address {
   /* Remote communicator pointer */
   struct nccl_ucp_comm *comm;
 
-  /* Worker address length */
-  size_t               address_length;
-
   /* Key and address for shared memory area */
   size_t               share_rkey_length;
   uint8_t              share_rkey[NCCL_UCP_RKEY_SIZE];
   nccl_ucp_share_t     *share;
 
   /* Worker address */
+  size_t               address_length;
   uint8_t              address[NCCL_UCP_WORKER_ADDR_SIZE];
 } nccl_ucp_address_t;
 
@@ -311,19 +309,25 @@ static ncclResult_t nccl_ucp_worker_init(nccl_ucp_worker_t *w, int dev,
   UCXCHECK(ucp_worker_query(w->ucp_worker, &attr));
 
   if (attr.thread_mode != UCS_THREAD_MODE_MULTI) {
-    INFO(NCCL_NET, "Thread mode multi is not supported");
+    WARN("Thread mode multi is not supported");
+    goto err;
   }
 
   w->address_length = attr.address_length;
   w->address        = malloc(attr.address_length);
   if (w->address == NULL) {
-    ucp_worker_release_address(w->ucp_worker, attr.address);
-    return ncclSystemError;
+    WARN("Failed to allocate worker address");
+    goto err;
   }
 
   memcpy(w->address, attr.address, attr.address_length);
   ucp_worker_release_address(w->ucp_worker, attr.address);
   return ncclSuccess;
+
+err:
+  ucp_worker_release_address(w->ucp_worker, attr.address);
+  ucp_worker_destroy(w->ucp_worker);
+  return ncclSystemError;
 }
 
 static ncclResult_t nccl_ucp_context_create(int dev,
@@ -339,9 +343,8 @@ static ncclResult_t nccl_ucp_context_create(int dev,
   UCXCHECK(ucp_config_modify(config, "NET_DEVICES", ucx_dev_name));
   UCXCHECK(ucp_config_modify(config, "TLS", "rc_x,cuda_copy"));
 
-  params.field_mask = UCP_PARAM_FIELD_FEATURES | UCP_PARAM_FIELD_REQUEST_SIZE;
+  params.field_mask = UCP_PARAM_FIELD_FEATURES;
   params.features   = UCP_FEATURE_RMA | UCP_FEATURE_AM;
-  params.request_size = 0;
 
   status = ucp_init(&params, config, ucp_context);
   ucp_config_release(config);
@@ -487,15 +490,13 @@ static nccl_ucp_comm_t *nccl_ucp_comm_create(int dev,
 
   comm->worker = nccl_ucp_worker_get(dev);
   if (comm->worker == NULL) {
-    free(comm);
-    return NULL;
+    goto err;
   }
 
   comm->local.share_mh = nccl_ucp_mem_register(
       comm, &comm->local.share, sizeof(comm->local.share), NCCL_PTR_HOST);
   if (comm->local.share_mh == NULL) {
-    free(comm);
-    return NULL;
+    goto err;
   }
 
   comm->type      = type;
@@ -508,11 +509,14 @@ static nccl_ucp_comm_t *nccl_ucp_comm_create(int dev,
                     (nccl_p2p_dmabuf_support(comm->dev) == ncclSuccess);
   if (comm->gpu_flush && (nccl_ucp_flush_ep_init(comm) != ncclSuccess)) {
     nccl_ucx_rma_deregmr(comm, comm->local.share_mh);
-    free(comm);
-    return NULL;
+    goto err;
   }
 
   return comm;
+
+err:
+  free(comm);
+  return NULL;
 }
 
 static ncclResult_t nccl_ucp_ep_create(nccl_ucp_comm_t *comm) {
@@ -745,7 +749,7 @@ static int nccl_ucp_mh_update(nccl_ucp_comm_t *comm, nccl_ucp_memh_t *mh) {
     status = nccl_ucp_shared_put(comm, packed, sizeof(*packed), remote,
                                  &comm->inflight_rkey);
     comm->inflight_rkey += (status == UCS_INPROGRESS);
-    mh->sent             = (status == UCS_INPROGRESS) || (status == UCS_OK);
+    mh->sent             = !UCS_STATUS_IS_ERR(status);
   }
 
   return mh->sent == 0;
@@ -834,7 +838,7 @@ static ncclResult_t nccl_ucx_rma_irecv(void *recv_comm, int n, void **data,
   status = nccl_ucp_shared_put(
       comm, rtr, sizeof(*rtr) - (NCCL_UCP_MAX_RECV - n) * sizeof(*rtr->chunk),
       remote, &req->inflight);
-  if ((status == UCS_OK) || (status == UCS_INPROGRESS)) {
+  if (!UCS_STATUS_IS_ERR(status)) {
     req->comm     = comm;
     req->type     = NCCL_UCP_TYPE_IRECV;
     req->rtr_id   = comm->rtr_id;
@@ -929,7 +933,7 @@ static ncclResult_t nccl_ucp_send(nccl_ucp_comm_t *comm, unsigned short id,
   req->comm      = comm;
   req->type      = NCCL_UCP_TYPE_ISEND;
   req->rtr_id    = rtr->id_start;
-  req->inflight  = (UCS_PTR_STATUS(status_ptr) == UCS_INPROGRESS);
+  req->inflight  = UCS_PTR_IS_PTR(status_ptr);
   atp->inflight += req->inflight;
   atp->sizes[i]  = size;
   atp->count++;
@@ -1032,8 +1036,6 @@ static ncclResult_t nccl_ucx_rma_iflush(void *recv_comm, int n, void **data,
                            (uint64_t)data[last], mh[last]->rkey, &param);
   assert(!UCS_PTR_IS_ERR(status_ptr));
   assert(req->comm == NULL);
-  assert((UCS_PTR_STATUS(status_ptr) == UCS_INPROGRESS) ||
-         (UCS_PTR_STATUS(status_ptr) == UCS_OK));
 
   req->type     = NCCL_UCP_TYPE_IFLUSH;
   req->inflight = (UCS_PTR_STATUS(status_ptr) == UCS_INPROGRESS);
@@ -1102,7 +1104,7 @@ static ncclResult_t nccl_ucx_rma_test(void *request, int *done, int *sizes) {
 
   *done = 0;
   while (ucp_worker_progress(comm->worker->ucp_worker) != 0)
-    ;
+    ; /* nothing */
 
   if (req->type == NCCL_UCP_TYPE_ISEND) {
     rtr    = &comm->local.share.rtr[req->rtr_id & NCCL_UCP_RING_MASK];
@@ -1124,7 +1126,7 @@ static ncclResult_t nccl_ucx_rma_test(void *request, int *done, int *sizes) {
         status         = nccl_ucp_shared_put(comm, atp, sizeof(*atp), remote,
                                              &req->inflight);
         req->inflight += (status == UCS_INPROGRESS);
-        rtr->avail    -= (status == UCS_INPROGRESS) || (status == UCS_OK);
+        rtr->avail    -= !UCS_STATUS_IS_ERR(status);
       } else {
         rtr->avail--;
       }
