@@ -530,6 +530,23 @@ static ncclResult_t nccl_ucp_ep_create(nccl_ucp_comm_t *comm) {
   return ncclSuccess;
 }
 
+static ncclResult_t nccl_ucx_rma_address_send(nccl_ucp_comm_t *comm) {
+  struct nccl_ucp_address peer;
+
+  assert(comm->worker->address_length <= sizeof(peer.address));
+  assert(comm->local.share_mh->rkey_buf_size <= sizeof(peer.share_rkey));
+
+  peer.comm              = comm;
+  peer.address_length    = comm->worker->address_length;
+  peer.share_rkey_length = comm->local.share_mh->rkey_buf_size;
+  peer.share             = &comm->local.share;
+  memcpy(peer.address, comm->worker->address, comm->worker->address_length);
+  memcpy(peer.share_rkey, comm->local.share_mh->rkey_buf,
+         comm->local.share_mh->rkey_buf_size);
+
+  return ncclSocketSend(&comm->sock, &peer, sizeof(peer));
+}
+
 static ncclResult_t nccl_ucx_rma_connect(int dev, void *listen_handle,
                                          void **send_comm,
                                          ncclNetDeviceHandle_t **sendDevComm) {
@@ -537,7 +554,6 @@ static ncclResult_t nccl_ucx_rma_connect(int dev, void *listen_handle,
   nccl_ucp_stage_t *stage          = &handle->stage;
   nccl_ucp_comm_t *comm            = stage->comm;
   int ready                        = 0;
-  struct nccl_ucp_address peer;
 
   *send_comm = NULL;
 
@@ -562,17 +578,7 @@ static ncclResult_t nccl_ucx_rma_connect(int dev, void *listen_handle,
       return ncclSuccess;
     }
 
-    assert(comm->local.share_mh->rkey_buf_size <= sizeof(peer.share_rkey));
-    assert(comm->worker->address_length <= sizeof(peer.address));
-
-    peer.comm              = comm;
-    peer.address_length    = comm->worker->address_length;
-    peer.share_rkey_length = comm->local.share_mh->rkey_buf_size;
-    peer.share             = &comm->local.share;
-    memcpy(peer.address, comm->worker->address, comm->worker->address_length);
-    memcpy(peer.share_rkey, comm->local.share_mh->rkey_buf,
-           comm->local.share_mh->rkey_buf_size);
-    NCCLCHECK(ncclSocketSend(&comm->sock, &peer, sizeof(peer)));
+    NCCLCHECK(nccl_ucx_rma_address_send(comm));
 
     stage->offset = 0;
     stage->state  = NCCL_UCP_RECEIVE_REMOTE;
@@ -614,7 +620,6 @@ ncclResult_t nccl_ucx_rma_accept(void *listen_comm, void **recv_comm,
   nccl_ucp_stage_t *stage        = &l_comm->stage;
   nccl_ucp_comm_t *comm          = stage->comm;
   int ready                      = 0;
-  struct nccl_ucp_address peer;
 
   *recv_comm = NULL;
 
@@ -651,19 +656,7 @@ ncclResult_t nccl_ucx_rma_accept(void *listen_comm, void **recv_comm,
     }
 
     NCCLCHECK(nccl_ucp_ep_create(comm));
-
-    assert(comm->worker->address_length <= sizeof(peer.address));
-    assert(comm->local.share_mh->rkey_buf_size <= sizeof(peer.share_rkey));
-
-    peer.comm              = comm;
-    peer.address_length    = comm->worker->address_length;
-    peer.share_rkey_length = comm->local.share_mh->rkey_buf_size;
-    peer.share             = &comm->local.share;
-    memcpy(peer.address, comm->worker->address, comm->worker->address_length);
-    memcpy(peer.share_rkey, comm->local.share_mh->rkey_buf,
-           comm->local.share_mh->rkey_buf_size);
-
-    NCCLCHECK(ncclSocketSend(&comm->sock, &peer, sizeof(peer)));
+    NCCLCHECK(nccl_ucx_rma_address_send(comm));
 
     stage->ready  = 0;
     stage->offset = 0;
