@@ -309,8 +309,7 @@ static ncclResult_t nccl_ucp_worker_init(nccl_ucp_worker_t *w, int dev,
   UCXCHECK(ucp_worker_query(w->ucp_worker, &attr));
 
   if (attr.thread_mode != UCS_THREAD_MODE_MULTI) {
-    WARN("Thread mode multi is not supported");
-    goto err;
+    INFO(NCCL_NET, "Thread mode multi is not supported");
   }
 
   w->address_length = attr.address_length;
