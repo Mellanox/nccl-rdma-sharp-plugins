@@ -340,7 +340,7 @@ static ncclResult_t nccl_ucp_context_create(int dev,
            ncclIbDevs[dev].portNum);
   UCXCHECK(ucp_config_read("NCCL", NULL, &config));
   UCXCHECK(ucp_config_modify(config, "NET_DEVICES", ucx_dev_name));
-  UCXCHECK(ucp_config_modify(config, "TLS", "rc_x,cuda_copy"));
+  UCXCHECK(ucp_config_modify(config, "TLS", "rc_x"));
 
   params.field_mask = UCP_PARAM_FIELD_FEATURES;
   params.features   = UCP_FEATURE_RMA | UCP_FEATURE_AM;
