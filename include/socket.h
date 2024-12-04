@@ -19,9 +19,6 @@
 
 #define MAX_IFS 16
 #define MAX_IF_NAME_SIZE 16
-#define SLEEP_INT            1000 // connection retry sleep interval in usec
-#define RETRY_REFUSED_TIMES   2e4 // connection refused retry times before reporting a timeout (20 sec)
-#define RETRY_TIMEDOUT_TIMES    3 // connection timed out retry times (each one can take 20s)
 #define SOCKET_NAME_MAXLEN (NI_MAXHOST+NI_MAXSERV)
 #define NCCL_SOCKET_MAGIC 0x564ab9f2fc4b9d6cULL
 
@@ -41,24 +38,25 @@ enum ncclSocketState {
   ncclSocketStateConnectPolling = 5,
   ncclSocketStateConnected = 6,
   ncclSocketStateReady = 7,
-  ncclSocketStateClosed = 8,
-  ncclSocketStateError = 9,
-  ncclSocketStateNum = 10
+  ncclSocketStateTerminating = 8,
+  ncclSocketStateClosed = 9,
+  ncclSocketStateError = 10,
+  ncclSocketStateNum = 11
+
 };
 
 enum ncclSocketType {
   ncclSocketTypeUnknown = 0,
   ncclSocketTypeBootstrap = 1,
   ncclSocketTypeProxy = 2,
-  ncclSocketTypeNetSocket = 3,
-  ncclSocketTypeNetIb = 4
+  ncclSocketTypeNetIb = 4,
+  ncclSocketTypeRasNetwork = 5
 };
 
 struct ncclSocket {
   int fd;
   int acceptFd;
-  int timedOutRetries;
-  int refusedRetries;
+  int errorRetries;
   union ncclSocketAddress addr;
   volatile uint32_t* abortFlag;
   int asyncFlag;
@@ -66,15 +64,18 @@ struct ncclSocket {
   int salen;
   uint64_t magic;
   enum ncclSocketType type;
+  int customRetry;
+  int finalizeCounter; // Used to keep track of initial handshake for async sockets.
+  char finalizeBuffer[sizeof(uint64_t)]; // Used to keep track of initial handshake for async sockets.
 };
 
-const char *ncclSocketToString(union ncclSocketAddress *addr, char *buf, const int numericHostForm);
+const char *ncclSocketToString(const union ncclSocketAddress *addr, char *buf, const int numericHostForm);
 ncclResult_t ncclSocketGetAddrFromString(union ncclSocketAddress* ua, const char* ip_port_pair);
 int ncclFindInterfaceMatchSubnet(char* ifNames, union ncclSocketAddress* localAddrs, union ncclSocketAddress* remoteAddr, int ifNameMaxSize, int maxIfs);
 int ncclFindInterfaces(char* ifNames, union ncclSocketAddress *ifAddrs, int ifNameMaxSize, int maxIfs);
 
 // Initialize a socket
-ncclResult_t ncclSocketInit(struct ncclSocket* sock, union ncclSocketAddress* addr, uint64_t magic, enum ncclSocketType type, volatile uint32_t* abortFlag, int asyncFlag);
+ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddress* addr, uint64_t magic, enum ncclSocketType type, volatile uint32_t* abortFlag, int asyncFlag, int customRetry);
 // Create a listening socket. sock->addr can be pre-filled with IP & port info. sock->fd is set after a successful call
 ncclResult_t ncclSocketListen(struct ncclSocket* sock);
 ncclResult_t ncclSocketGetAddr(struct ncclSocket* sock, union ncclSocketAddress* addr);
@@ -90,7 +91,7 @@ ncclResult_t ncclSocketSetFd(int fd, struct ncclSocket* sock);
 #define NCCL_SOCKET_SEND 0
 #define NCCL_SOCKET_RECV 1
 
-ncclResult_t ncclSocketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset);
+ncclResult_t ncclSocketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int* closed);
 ncclResult_t ncclSocketWait(int op, struct ncclSocket* sock, void* ptr, int size, int* offset);
 ncclResult_t ncclSocketSend(struct ncclSocket* sock, void* ptr, int size);
 ncclResult_t ncclSocketRecv(struct ncclSocket* sock, void* ptr, int size);

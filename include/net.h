@@ -9,6 +9,10 @@
 #include <stdlib.h>
 
 #define NCCL_NET_HANDLE_MAXSIZE 128
+//Maximum value NCCL can accept for maxP2pBytes and maxCollBytes net properties
+#define NCCL_MAX_NET_SIZE_BYTES (1*1024*1024*1024*1024L)
+#define NCCL_NET_OPTIONAL_RECV_COMPLETION 0x1
+
 
 #define NCCL_PTR_HOST 0x1
 #define NCCL_PTR_CUDA 0x2
@@ -22,6 +26,7 @@ typedef enum {NCCL_INIT=1, NCCL_COLL=2, NCCL_P2P=4, NCCL_SHM=8, NCCL_NET=16, NCC
 
 typedef void (*ncclDebugLogger_t)(ncclDebugLogLevel level, unsigned long flags, const char *file, int line, const char *fmt, ...);
 
+#include "net_v9.h"
 #include "net_v8.h"
 #include "net_v7.h"
 #include "net_v6.h"

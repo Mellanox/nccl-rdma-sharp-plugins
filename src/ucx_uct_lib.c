@@ -11,7 +11,8 @@ static pthread_mutex_t nccl_uct_lock = PTHREAD_MUTEX_INITIALIZER;
 
 nccl_uct_context_t context = {
     .tl_name   = "rc_mlx5",
-    .dev_count = -1
+    .dev_count = -1,
+    .merge_dev_count = -1
 };
 
 void nccl_uct_empty_callback(uct_completion_t *comp) {
@@ -450,7 +451,7 @@ ncclResult_t nccl_uct_listen(int dev, void *listen_handle, void **listen_comm) {
 
   NCCLCHECK(ncclSocketInit(&l_comm->sock, &context.if_addr,
                            NCCL_UCT_LISTEN_HANDLE_MAGIC, ncclSocketTypeNetIb,
-                           NULL, 1));
+                           NULL, 1, 0));
   NCCLCHECK(ncclSocketListen(&l_comm->sock));
   NCCLCHECK(ncclSocketGetAddr(&l_comm->sock, &addr));
 
@@ -544,7 +545,7 @@ ncclResult_t nccl_uct_connect(int dev, void *listen_handle, void **send_comm,
     NCCLCHECK(context.ops.comm_alloc(&comm));
     NCCLCHECK(context.ops.comm_init(comm, &context, NULL, dev, handle->comm));
     NCCLCHECK(ncclSocketInit(&comm->sock, &handle->listener.addr, handle->magic,
-                             ncclSocketTypeNetIb, NULL, 1));
+                             ncclSocketTypeNetIb, NULL, 1, 0));
     NCCLCHECK(ncclSocketConnect(&comm->sock));
 
     stage->comm  = comm;
@@ -568,7 +569,7 @@ ncclResult_t nccl_uct_connect(int dev, void *listen_handle, void **send_comm,
   case NCCL_UCT_RECEIVE_ADDR:
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->sock,
                                  &comm->remote.addr, sizeof(comm->remote.addr),
-                                 &stage->offset));
+                                 &stage->offset, NULL));
     if (stage->offset != sizeof(comm->remote.addr)) {
       return ncclSuccess; /* In progress */
     }
@@ -608,7 +609,7 @@ ncclResult_t nccl_uct_accept(void *listen_comm, void **recv_comm,
     comm = l_comm->comm;
 
     NCCLCHECK(ncclSocketInit(&comm->sock, NULL, NCCL_SOCKET_MAGIC,
-                             ncclSocketTypeUnknown, NULL, 0));
+                             ncclSocketTypeUnknown, NULL, 0, 0));
     NCCLCHECK(ncclSocketAccept(&comm->sock, &l_comm->sock));
     NCCLCHECK(context.ops.comm_init(comm, l_comm->context, l_comm->uct_worker,
                                     l_comm->dev, NULL));
@@ -633,7 +634,7 @@ ncclResult_t nccl_uct_accept(void *listen_comm, void **recv_comm,
 
   case NCCL_UCT_RECEIVE_REMOTE:
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->sock, &comm->remote,
-                                 sizeof(comm->remote), &stage->offset));
+                                 sizeof(comm->remote), &stage->offset, NULL));
     if (stage->offset != sizeof(comm->remote)) {
       return ncclSuccess;
     }
@@ -647,7 +648,7 @@ ncclResult_t nccl_uct_accept(void *listen_comm, void **recv_comm,
 
   case NCCL_UCT_RX_READY:
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->sock, &stage->ready,
-                                 sizeof(stage->ready), &stage->offset));
+                                 sizeof(stage->ready), &stage->offset, NULL));
     if (stage->offset != sizeof(ready)) {
       return ncclSuccess;
     }
@@ -807,7 +808,29 @@ void nccl_uct_comm_deinit(nccl_uct_comm_t *comm) {
 }
 
 ncclResult_t nccl_uct_get_properties(int dev, ncclNetProperties_t *props) {
-  return nccl_p2p_ib_get_properties(ncclIbDevs, dev, props);
+  return nccl_p2p_ib_get_properties(ncclIbDevs, context.merge_dev_count, dev, props);
+}
+
+ncclResult_t nccl_uct_get_properties_v8(int dev, ncclNetProperties_v8_t *props_v8) {
+  ncclNetProperties_t props;
+  ncclResult_t ret = nccl_uct_get_properties(dev, &props);
+  if (ret != ncclSuccess) {
+    return ret;
+  }
+
+  props_v8->name             = props.name;
+  props_v8->pciPath          = props.pciPath;
+  props_v8->guid             = props.guid;
+  props_v8->ptrSupport       = props.ptrSupport;
+  props_v8->regIsGlobal      = props.regIsGlobal;
+  props_v8->speed            = props.speed;
+  props_v8->latency          = props.latency;
+  props_v8->port             = props.port;
+  props_v8->maxComms         = props.maxComms;
+  props_v8->maxRecvs         = props.maxRecvs;
+  props_v8->netDeviceType    = props.netDeviceType;
+  props_v8->netDeviceVersion = props.netDeviceVersion;
+  return ncclSuccess;
 }
 
 ncclResult_t nccl_uct_get_properties_v7(int dev,
