@@ -196,11 +196,11 @@ static void ibvQpStateName(enum ibv_qp_state state, char* msg, const size_t len)
   }
 }
 
-static void ibvModifyQpLog(struct ibv_qp* qp, enum ibv_qp_state qpState, char* msg, size_t msgLen) {
+#define QP_ATTR(attr, userAttr, userFlag, mask) ((userFlag & mask) ? (userAttr) : (attr))
+
+static void ibvModifyQpLog(struct ibv_qp* qp, enum ibv_qp_state qpState, struct ibv_qp_attr* userAttr, int userFlag, char* msg, size_t msgLen) {
   ncclResult_t res;
-  int portNum = -1;
-  struct ibv_qp_attr attr;
-  struct ibv_qp_init_attr init_attr;
+  int portNum = -1, gidIndex = -1;
   char localGidName[INET6_ADDRSTRLEN], remoteGidName[INET6_ADDRSTRLEN];
   const char *localGidRes = NULL, *remoteGidRes = NULL;
 
@@ -210,22 +210,31 @@ static void ibvModifyQpLog(struct ibv_qp* qp, enum ibv_qp_state qpState, char* m
   char devName[IBV_SYSFS_NAME_MAX] = "";
   snprintf(devName, sizeof(devName), "%s", (qp->pd->context) ? wrap_ibv_get_device_name(qp->pd->context->device) : "N/A");
 
-  // get the QP attr, if error, log what we have
+  struct ibv_qp_attr attr;
+  struct ibv_qp_init_attr init_attr;
   int attr_mask = IBV_QP_PORT | IBV_QP_AV;
-  NCCLCHECKGOTO(wrap_ibv_query_qp(qp, &attr, attr_mask, &init_attr), res, print);
-  portNum = attr.port_num;
-  if (attr.ah_attr.is_global) {
-    union ibv_gid* remoteGid = &attr.ah_attr.grh.dgid;
+  res = wrap_ibv_query_qp(qp, &attr, attr_mask, &init_attr);
+  struct ibv_qp_attr *qpAttr = (res == ncclSuccess) ? &attr : NULL;
+
+  // port info, portAttr can be NULL if not given by the user and query_qp failed
+  struct ibv_qp_attr *portAttr = QP_ATTR(qpAttr, userAttr, userFlag, IBV_QP_PORT);
+  portNum = portAttr ? portAttr->port_num : -1;
+
+  // address info, avAttr can be NULL if not given by the user and query_qp failed
+  struct ibv_qp_attr *avAttr = QP_ATTR(qpAttr, userAttr, userFlag, IBV_QP_AV);
+  if (avAttr && avAttr->ah_attr.is_global) {
+    union ibv_gid *remoteGid = &avAttr->ah_attr.grh.dgid;
     remoteGidRes = ibvGetGidStr(remoteGid, remoteGidName, sizeof(remoteGidName));
     // we need pd->context to retrieve local GID, skip if not there
     if (!qp->pd->context) goto print;
+    gidIndex =  avAttr->ah_attr.grh.sgid_index;
     union ibv_gid localGid;
-    NCCLCHECKGOTO(wrap_ibv_query_gid(qp->pd->context, attr.port_num, attr.ah_attr.grh.sgid_index, &localGid), res, print);
+    NCCLCHECKGOTO(wrap_ibv_query_gid(qp->pd->context, portNum, gidIndex, &localGid), res, print);
     localGidRes = ibvGetGidStr(&localGid, localGidName, sizeof(localGidName));
   }
 print:
-  snprintf(msg, msgLen, "on dev %s:%d, curr state %s, next state %s, local GID %s, remote GID %s",
-           devName, portNum, currState, nextState, localGidRes ? localGidName : "N/A", remoteGidRes ? remoteGidName : "N/A");
+  snprintf(msg, msgLen, "on dev %s:%d, curr state %s, next state %s, local GID index %d, local GID %s, remote GID %s",
+           devName, portNum, currState, nextState, gidIndex, localGidRes ? localGidName : "N/A", remoteGidRes ? remoteGidName : "N/A");
   return;
 }
 
@@ -237,7 +246,7 @@ ncclResult_t wrap_ibv_modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int
   do {
     if (attempts > 0) {
       unsigned int sleepTime = timeOut * attempts;
-      ibvModifyQpLog(qp, attr->qp_state, qpMsg, sizeof(qpMsg));
+      ibvModifyQpLog(qp, attr->qp_state, attr, attr_mask, qpMsg, sizeof(qpMsg));
       INFO(NCCL_NET, "Call to ibv_modify_qp failed with %d %s, %s, retrying %d/%d after %u msec of sleep", ret, strerror(ret), qpMsg, attempts, maxCnt, sleepTime);
       // sleep before retrying
       struct timespec tv = {.tv_sec = sleepTime / 1000, .tv_nsec = (sleepTime % 1000) * ((long)1e6)};
@@ -247,7 +256,7 @@ ncclResult_t wrap_ibv_modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int
     attempts++;
   } while (IBV_MQP_RETRY_ERRNO_ALL(ret) && attempts < maxCnt);
   if (ret != 0) {
-    ibvModifyQpLog(qp, attr->qp_state, qpMsg, sizeof(qpMsg));
+    ibvModifyQpLog(qp, attr->qp_state, attr, attr_mask, qpMsg, sizeof(qpMsg));
     WARN("Call to ibv_modify_qp failed with %d %s, %s", ret, strerror(ret), qpMsg);
     return ncclSystemError;
   }

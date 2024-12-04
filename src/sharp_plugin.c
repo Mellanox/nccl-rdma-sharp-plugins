@@ -775,7 +775,8 @@ ncclCollNet_v9_t ncclCollNetPlugin_v9 = {
   ncclSharpIflush,
   ncclSharpTest,
   ncclSharpCloseColl,
-  ncclSharpCloseListen
+  ncclSharpCloseListen,
+  NULL
 };
 
 ncclCollNet_v8_t ncclCollNetPlugin_v8 = {
