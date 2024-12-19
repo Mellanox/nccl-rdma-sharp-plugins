@@ -472,8 +472,10 @@ static ncclResult_t nccl_ucp_flush_ep_init(nccl_ucp_comm_t *comm) {
 
   UCXCHECK(ucp_worker_query(comm->worker->ucp_worker, &attr));
 
-  params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
+  params.field_mask =
+      UCP_EP_PARAM_FIELD_REMOTE_ADDRESS | UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE;
   params.address    = attr.address;
+  params.err_mode = UCP_ERR_HANDLING_MODE_PEER; /* Mandatory with force close */
   UCXCHECK(
       ucp_ep_create(comm->worker->ucp_worker, &params, &comm->ucp_flush_ep));
   free(attr.address);
@@ -519,8 +521,12 @@ err:
 }
 
 static ncclResult_t nccl_ucp_ep_create(nccl_ucp_comm_t *comm) {
-  ucp_ep_params_t params = {.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS,
-                            .address    = (void*)comm->peer.address};
+  ucp_ep_params_t params = {
+    .field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
+                  UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE,
+    .address    = (void*)comm->peer.address,
+    .err_mode   = UCP_ERR_HANDLING_MODE_PEER /* Mandatory with force close */
+  };
 
   UCXCHECK(ucp_ep_create(comm->worker->ucp_worker, &params, &comm->ucp_ep));
   UCXCHECK(ucp_ep_rkey_unpack(comm->ucp_ep, comm->peer.share_rkey,
@@ -1038,16 +1044,27 @@ static ncclResult_t nccl_ucx_rma_iflush(void *recv_comm, int n, void **data,
   return ncclSuccess;
 }
 
+static void nccl_ucx_rma_close_ep(ucp_ep_h ep) {
+  void *req;
+  ucp_request_param_t param = {.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS,
+                               .flags        = UCP_EP_CLOSE_FLAG_FORCE};
+
+  req = ucp_ep_close_nbx(ep, &param);
+  (void)req;
+  assert(req == NULL);
+}
+
 static ncclResult_t nccl_ucx_rma_close_comm(void *close_comm) {
   int i;
   nccl_ucp_comm_t *comm = close_comm;
 
   assert(comm->total == 0);
   assert(comm->inflight_rkey == 0);
-  ucp_ep_destroy(comm->ucp_ep);
+
+  nccl_ucx_rma_close_ep(comm->ucp_ep);
   if (comm->ucp_flush_ep != NULL) {
     assert(comm->gpu_flush);
-    ucp_ep_destroy(comm->ucp_flush_ep);
+    nccl_ucx_rma_close_ep(comm->ucp_flush_ep);
   }
 
   for (i = 0; i < NCCL_UCP_RKEY_COUNT; i++) {
