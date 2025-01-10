@@ -1,5 +1,7 @@
 /*
- * Copyright (c) 2017-2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: NVIDIA CORPORATION & AFFILIATES
+ * Copyright (c) 2017-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
  */
 
 #ifndef NCCL_NET_V8_H_
