@@ -54,6 +54,7 @@ typedef struct nccl_ucp_worker {
 
 typedef struct {
   int                     dev_count;
+  int                     merged_ib_devs;
   int                     listener_count;
   char                    if_name[MAX_IF_NAME_SIZE];
   union ncclSocketAddress if_addr;
@@ -223,13 +224,14 @@ typedef struct {
   nccl_ucp_stage_t stage;
 } nccl_ucp_listen_handle_t;
 
-static nccl_ucp_context_t context = {.dev_count = -1};
+static nccl_ucp_context_t context = {.dev_count = -1, .merged_ib_devs = -1};
 
 static pthread_mutex_t global_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static ncclResult_t nccl_ucx_rma_init(ncclDebugLogger_t logFunction) {
-  return nccl_p2p_ib_init(&context.dev_count, ncclIbDevs, context.if_name,
-                          &context.if_addr, NULL, logFunction);
+  return nccl_p2p_ib_init(&context.dev_count, &context.merged_ib_devs,
+                          ncclIbDevs, context.if_name, &context.if_addr,
+                          NULL, logFunction);
 }
 
 static ncclResult_t nccl_ucx_rma_devices(int *ndev) {
@@ -239,7 +241,31 @@ static ncclResult_t nccl_ucx_rma_devices(int *ndev) {
 
 static ncclResult_t nccl_ucx_rma_get_properties(int dev,
                                                 ncclNetProperties_t *props) {
-  return nccl_p2p_ib_get_properties(ncclIbDevs, dev, props);
+  return nccl_p2p_ib_get_properties(ncclIbDevs, context.merged_ib_devs, dev,
+                                    props);
+}
+
+ncclResult_t nccl_ucx_rma_get_properties_v8(int dev, ncclNetProperties_v8_t* props_v8)
+{
+  ncclNetProperties_t props;
+  ncclResult_t ret = nccl_ucx_rma_get_properties(dev, &props);
+  if (ret != ncclSuccess) {
+      return ret;
+  }
+
+  props_v8->name             = props.name;
+  props_v8->pciPath          = props.pciPath;
+  props_v8->guid             = props.guid;
+  props_v8->ptrSupport       = props.ptrSupport;
+  props_v8->regIsGlobal      = props.regIsGlobal;
+  props_v8->speed            = props.speed;
+  props_v8->latency          = props.latency;
+  props_v8->port             = props.port;
+  props_v8->maxComms         = props.maxComms;
+  props_v8->maxRecvs         = props.maxRecvs;
+  props_v8->netDeviceType    = props.netDeviceType;
+  props_v8->netDeviceVersion = props.netDeviceVersion;
+  return ncclSuccess;
 }
 
 static ncclResult_t nccl_ucx_rma_listen(int dev, void *listen_handle,
@@ -259,7 +285,7 @@ static ncclResult_t nccl_ucx_rma_listen(int dev, void *listen_handle,
   /* Prepare socket */
   NCCLCHECK(ncclSocketInit(&l_comm->sock, &context.if_addr,
                            NCCL_UCP_HANDLE_MAGIC, ncclSocketTypeNetIb, NULL,
-                           1));
+                           1, 0));
   NCCLCHECK(ncclSocketListen(&l_comm->sock));
   NCCLCHECK(ncclSocketGetAddr(&l_comm->sock, &addr));
 
@@ -571,7 +597,7 @@ static ncclResult_t nccl_ucx_rma_connect(int dev, void *listen_handle,
     }
 
     NCCLCHECK(ncclSocketInit(&stage->comm->sock, &handle->listener.addr,
-                             handle->magic, ncclSocketTypeNetIb, NULL, 1));
+                             handle->magic, ncclSocketTypeNetIb, NULL, 1, 0));
     NCCLCHECK(ncclSocketConnect(&stage->comm->sock));
 
     stage->state = NCCL_UCP_CONNECT;
@@ -591,7 +617,7 @@ static ncclResult_t nccl_ucx_rma_connect(int dev, void *listen_handle,
 
   case NCCL_UCP_RECEIVE_REMOTE:
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->sock, &comm->peer,
-                                 sizeof(comm->peer), &stage->offset));
+                                 sizeof(comm->peer), &stage->offset, NULL));
     if (stage->offset != sizeof(comm->peer)) {
       return ncclSuccess;
     }
@@ -637,7 +663,7 @@ ncclResult_t nccl_ucx_rma_accept(void *listen_comm, void **recv_comm,
     }
 
     NCCLCHECK(ncclSocketInit(&comm->sock, NULL, NCCL_UCP_HANDLE_MAGIC,
-                             ncclSocketTypeUnknown, NULL, 0));
+                             ncclSocketTypeUnknown, NULL, 0, 0));
     NCCLCHECK(ncclSocketAccept(&comm->sock, &l_comm->sock));
 
     stage->state = NCCL_UCP_ACCEPT;
@@ -655,7 +681,7 @@ ncclResult_t nccl_ucx_rma_accept(void *listen_comm, void **recv_comm,
 
   case NCCL_UCP_RECEIVE_REMOTE:
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->sock, &comm->peer,
-                                 sizeof(comm->peer), &stage->offset));
+                                 sizeof(comm->peer), &stage->offset, NULL));
     if (stage->offset != sizeof(comm->peer)) {
       return ncclSuccess;
     }
@@ -670,7 +696,7 @@ ncclResult_t nccl_ucx_rma_accept(void *listen_comm, void **recv_comm,
 
   case NCCL_UCP_RX_READY:
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->sock, &stage->ready,
-                                 sizeof(stage->ready), &stage->offset));
+                                 sizeof(stage->ready), &stage->offset, NULL));
     if (stage->offset != sizeof(stage->ready)) {
       return ncclSuccess; /* In progress */
     }
@@ -1234,7 +1260,7 @@ ncclNet_v8_t ucxRmaPlugin_v8 = {
   .name          = UCX_RMA_PLUGIN_NAME,
   .init          = nccl_ucx_rma_init,
   .devices       = nccl_ucx_rma_devices,
-  .getProperties = nccl_ucx_rma_get_properties,
+  .getProperties = nccl_ucx_rma_get_properties_v8,
   .listen        = nccl_ucx_rma_listen,
   .connect       = nccl_ucx_rma_connect,
   .accept        = nccl_ucx_rma_accept,
