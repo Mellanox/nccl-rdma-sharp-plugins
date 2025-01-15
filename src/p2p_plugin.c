@@ -290,7 +290,7 @@ ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->maxComms = ibDev->maxQp;
 
   if (p2p_plugin == NCCL_P2P_IB || p2p_plugin == NCCL_P2P_UCX ||
-      nccl_p2p_is_uct_plugin(p2p_plugin)) {
+      p2p_plugin == NCCL_P2P_UCX_RMA || nccl_p2p_is_uct_plugin(p2p_plugin)) {
     props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
   } else {
     props->maxRecvs = 1;
