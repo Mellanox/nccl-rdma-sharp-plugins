@@ -88,7 +88,7 @@ typedef struct nccl_ucp_packed {
 
 typedef struct nccl_ucp_chunk {
   uint64_t       data;
-  int            size;
+  size_t         size;
   int            tag;
   unsigned short rkey_id;
   unsigned short id;
@@ -109,7 +109,7 @@ typedef struct nccl_ucp_atp {
   unsigned char  count;    /* Added entries, incremented when posting */
   char           inflight; /* Chunk still being sent */
   char           reqs;     /* Count request alive */
-  int            sizes[NCCL_UCP_MAX_RECV];
+  size_t         sizes[NCCL_UCP_MAX_RECV];
   unsigned short id; /* Id of the origin RTR again */
 } __attribute__((aligned(64))) nccl_ucp_atp_t;
 
@@ -814,7 +814,7 @@ static ncclResult_t nccl_ucx_rma_regmr_dmabuf(void *comm, void *data,
 }
 
 static ncclResult_t nccl_ucx_rma_irecv(void *recv_comm, int n, void **data,
-                                       int *sizes, int *tags, void **mhandle,
+                                       size_t *sizes, int *tags, void **mhandle,
                                        void **request) {
   nccl_ucp_comm_t *comm = recv_comm;
   nccl_ucp_memh_t **mh  = (nccl_ucp_memh_t**)mhandle;
@@ -878,6 +878,20 @@ static ncclResult_t nccl_ucx_rma_irecv(void *recv_comm, int n, void **data,
   return ncclSuccess;
 }
 
+static ncclResult_t nccl_ucx_rma_irecv_v8(void *recv_comm, int n, void **data,
+                                          int *sizes, int *tags, void **mhandle,
+                                          void **request) {
+  size_t sizes_sizet[NCCL_UCP_MAX_RECV];
+  int i;
+
+  for (i = 0; i < n; i++) {
+    sizes_sizet[i] = (size_t)sizes[i];
+  }
+
+  return nccl_ucx_rma_irecv(recv_comm, n, data, sizes_sizet, tags, mhandle,
+                            request);
+}
+
 static ucp_rkey_h nccl_ucp_rkey_get(nccl_ucp_comm_t *comm,
                                     unsigned short rkey_id) {
   nccl_ucp_rkey_t *nccl_rkey;
@@ -908,7 +922,7 @@ static ucp_rkey_h nccl_ucp_rkey_get(nccl_ucp_comm_t *comm,
 }
 
 static ncclResult_t nccl_ucp_send(nccl_ucp_comm_t *comm, unsigned short id,
-                                  unsigned i, void *data, int size,
+                                  unsigned i, void *data, size_t size,
                                   nccl_ucp_memh_t *mh, void **request) {
   nccl_ucp_req_t *req;
   nccl_ucp_rtr_t *rtr;
@@ -971,7 +985,7 @@ static ncclResult_t nccl_ucp_send(nccl_ucp_comm_t *comm, unsigned short id,
   return ncclSuccess;
 }
 
-static ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, int size,
+static ncclResult_t nccl_ucx_rma_isend(void *send_comm, void *data, size_t size,
                                        int tag, void *mhandle, void **request) {
   ncclResult_t result   = ncclSuccess;
   nccl_ucp_comm_t *comm = send_comm;
@@ -1015,6 +1029,13 @@ out:
   }
 
   return result;
+}
+
+static ncclResult_t nccl_ucx_rma_isend_v8(void *send_comm, void *data, int size,
+                                          int tag, void *mhandle,
+                                          void **request) {
+    return nccl_ucx_rma_isend(send_comm, data, (size_t)size, tag, mhandle,
+                              request);
 }
 
 static int nccl_ucp_flush_index(nccl_ucp_comm_t *comm, int *sizes, int n) {
@@ -1256,6 +1277,28 @@ static ncclResult_t nccl_ucx_rma_accept_v6(void *listen_comm,
 }
 
 #define UCX_RMA_PLUGIN_NAME "UCX-RMA"
+ncclNet_v9_t ucxRmaPlugin_v9 = {
+  .name          = UCX_RMA_PLUGIN_NAME,
+  .init          = nccl_ucx_rma_init,
+  .devices       = nccl_ucx_rma_devices,
+  .getProperties = nccl_ucx_rma_get_properties,
+  .listen        = nccl_ucx_rma_listen,
+  .connect       = nccl_ucx_rma_connect,
+  .accept        = nccl_ucx_rma_accept,
+  .regMr         = nccl_ucx_rma_regmr,
+  .regMrDmaBuf   = nccl_ucx_rma_regmr_dmabuf,
+  .deregMr       = nccl_ucx_rma_deregmr,
+  .isend         = nccl_ucx_rma_isend,
+  .irecv         = nccl_ucx_rma_irecv,
+  .iflush        = nccl_ucx_rma_iflush,
+  .test          = nccl_ucx_rma_test,
+  .closeSend     = nccl_ucx_rma_close_comm,
+  .closeRecv     = nccl_ucx_rma_close_comm,
+  .closeListen   = nccl_ucx_rma_close_listen,
+  .irecvConsumed = NULL,
+  .makeVDevice   = NULL
+};
+
 ncclNet_v8_t ucxRmaPlugin_v8 = {
   .name          = UCX_RMA_PLUGIN_NAME,
   .init          = nccl_ucx_rma_init,
@@ -1267,8 +1310,8 @@ ncclNet_v8_t ucxRmaPlugin_v8 = {
   .regMr         = nccl_ucx_rma_regmr,
   .regMrDmaBuf   = nccl_ucx_rma_regmr_dmabuf,
   .deregMr       = nccl_ucx_rma_deregmr,
-  .isend         = nccl_ucx_rma_isend,
-  .irecv         = nccl_ucx_rma_irecv,
+  .isend         = nccl_ucx_rma_isend_v8,
+  .irecv         = nccl_ucx_rma_irecv_v8,
   .iflush        = nccl_ucx_rma_iflush,
   .test          = nccl_ucx_rma_test,
   .closeSend     = nccl_ucx_rma_close_comm,
@@ -1287,8 +1330,8 @@ ncclNet_v7_t ucxRmaPlugin_v7 = {
   .regMr         = nccl_ucx_rma_regmr_v7,
   .regMrDmaBuf   = nccl_ucx_rma_regmr_dmabuf,
   .deregMr       = nccl_ucx_rma_deregmr,
-  .isend         = nccl_ucx_rma_isend,
-  .irecv         = nccl_ucx_rma_irecv,
+  .isend         = nccl_ucx_rma_isend_v8,
+  .irecv         = nccl_ucx_rma_irecv_v8,
   .iflush        = nccl_ucx_rma_iflush,
   .test          = nccl_ucx_rma_test,
   .closeSend     = nccl_ucx_rma_close_comm,
@@ -1307,8 +1350,8 @@ ncclNet_v6_t ucxRmaPlugin_v6 = {
     .regMr         = nccl_ucx_rma_regmr_v7,
     .regMrDmaBuf   = nccl_ucx_rma_regmr_dmabuf,
     .deregMr       = nccl_ucx_rma_deregmr,
-    .isend         = nccl_ucx_rma_isend,
-    .irecv         = nccl_ucx_rma_irecv,
+    .isend         = nccl_ucx_rma_isend_v8,
+    .irecv         = nccl_ucx_rma_irecv_v8,
     .iflush        = nccl_ucx_rma_iflush,
     .test          = nccl_ucx_rma_test,
     .closeSend     = nccl_ucx_rma_close_comm,
@@ -1326,8 +1369,8 @@ ncclNet_v5_t ucxRmaPlugin_v5 = {
     .accept        = nccl_ucx_rma_accept_v6,
     .regMr         = nccl_ucx_rma_regmr_v7,
     .deregMr       = nccl_ucx_rma_deregmr,
-    .isend         = nccl_ucx_rma_isend,
-    .irecv         = nccl_ucx_rma_irecv,
+    .isend         = nccl_ucx_rma_isend_v8,
+    .irecv         = nccl_ucx_rma_irecv_v8,
     .iflush        = nccl_ucx_rma_iflush,
     .test          = nccl_ucx_rma_test,
     .closeSend     = nccl_ucx_rma_close_comm,
