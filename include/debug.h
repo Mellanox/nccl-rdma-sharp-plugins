@@ -35,4 +35,6 @@ extern ncclDebugLogger_t pluginLogFunction;
 
 void ncclSetThreadName(pthread_t thread, const char *fmt, ...);
 
+void ncclResetDebugInit();
+
 #endif

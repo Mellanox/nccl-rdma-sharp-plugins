@@ -8,10 +8,6 @@
 #define NCCL_H_
 
 #include <cuda_runtime.h>
-#include <cuda_fp16.h>
-#if CUDART_VERSION >= 11000
-#include <cuda_bf16.h>
-#endif
 
 #define NCCL_MAJOR 2
 #define NCCL_MINOR 20
@@ -146,6 +142,11 @@ const char* pncclGetErrorString(ncclResult_t result);
  const char*  ncclGetLastError(ncclComm_t comm);
  const char* pncclGetLastError(ncclComm_t comm);
 
+/* Reload environment variables that determine logging. */
+void  ncclResetDebugInit();
+void pncclResetDebugInit();
+
+
 /* Checks whether the comm has encountered any asynchronous errors */
 ncclResult_t  ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
 ncclResult_t pncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
@@ -201,12 +202,10 @@ typedef enum { ncclInt8       = 0, ncclChar       = 0,
                ncclFloat16    = 6, ncclHalf       = 6,
                ncclFloat32    = 7, ncclFloat      = 7,
                ncclFloat64    = 8, ncclDouble     = 8,
-#if CUDART_VERSION >= 11000
                ncclBfloat16   = 9,
-               ncclNumTypes   = 10
-#else
-               ncclNumTypes   = 9
-#endif
+               ncclFloat8e4m3 = 10,
+               ncclFloat8e5m2 = 11,
+               ncclNumTypes   = 12
 } ncclDataType_t;
 
 /* ncclScalarResidence_t: Location and dereferencing logic for scalar arguments. */
