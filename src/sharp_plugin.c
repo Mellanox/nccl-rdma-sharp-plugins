@@ -22,12 +22,14 @@
 #include "sharp/api/sharp_coll.h"
 #include "utils.h"
 
+extern ncclNet_v10_t ncclNetPlugin_v10;
 extern ncclNet_v9_t ncclNetPlugin_v9;
 extern ncclNet_v8_t ncclNetPlugin_v8;
 extern ncclNet_v7_t ncclNetPlugin_v7;
 extern ncclNet_v6_t ncclNetPlugin_v6;
 extern ncclNet_v5_t ncclNetPlugin_v5;
 
+extern ncclCollNet_v10_t ncclCollNetPlugin_v10;
 extern ncclCollNet_v9_t ncclCollNetPlugin_v9;
 
 int ncclNSharpDevs = -1;
@@ -214,14 +216,16 @@ ncclResult_t ncclSharpInit(ncclDebugLogger_t logFunction) {
 
   if (ncclParamSharpDisableAG()) {
     INFO(NCCL_NET, "Disabled SHARP Allgather");
+    ncclCollNetPlugin_v10.iallgather = NULL;
     ncclCollNetPlugin_v9.iallgather = NULL;
   }
   if (ncclParamSharpDisableRS()) {
     INFO(NCCL_NET, "Disabled SHARP reduce-scatter");
+    ncclCollNetPlugin_v10.ireducescatter = NULL;
     ncclCollNetPlugin_v9.ireducescatter = NULL;
   }
 
-  return ncclNetPlugin_v9.init(logFunction);
+  return ncclNetPlugin_v10.init(logFunction, NULL);
 }
 
 ncclResult_t ncclSharpDevices(int* ndev) {
@@ -229,6 +233,16 @@ ncclResult_t ncclSharpDevices(int* ndev) {
   return ncclSuccess;
 }
 
+
+ncclResult_t ncclSharpGetProperties_v10(int dev, ncclNetProperties_v10_t* props) {
+  NCCLCHECK(ncclNetPlugin_v10.getProperties(dev, props));
+#if (SHARP_API > ((3L<<SHARP_MAJOR_BIT)|(6L << SHARP_MINOR_BIT)))
+  props->maxCollBytes = NCCL_MAX_NET_SIZE_BYTES;
+#else
+  props->maxCollBytes = (512*1024*1024L); //limited to 512M in SHARP 3.6 or older
+#endif
+  return ncclSuccess;
+}
 
 ncclResult_t ncclSharpGetProperties_v9(int dev, ncclNetProperties_v9_t* props) {
   NCCLCHECK(ncclNetPlugin_v9.getProperties(dev, props));
@@ -261,7 +275,7 @@ ncclResult_t ncclSharpListen(int dev, void* opaqueHandle, void** listenComm) {
   ncclResult_t status;
 
   NCCLCHECK(ncclIbMalloc((void**)&lComm, sizeof(struct ncclSharpListenComm)));
-  status = ncclNetPlugin_v9.listen(dev, opaqueHandle, &lComm->listenCommP2P);
+  status = ncclNetPlugin_v10.listen(dev, opaqueHandle, &lComm->listenCommP2P);
   lComm->dev = dev;
   *listenComm = lComm;
   return status;
@@ -411,7 +425,7 @@ ncclResult_t ncclSharpRegMrDmaBuf(void* collComm, void* data, size_t size, int t
   }
   TRACE(NCCL_INIT,"sharpRegAddr %lx size %ld handle %x", data, size, mh->mr);
 
-  NCCLCHECK(ncclNetPlugin_v9.regMrDmaBuf(cComm->recvComm, data, size, type, offset, fd, &mh->ncclIbMr));
+  NCCLCHECK(ncclNetPlugin_v10.regMrDmaBuf(cComm->recvComm, data, size, type, offset, fd, &mh->ncclIbMr));
 
   *mhandle = mh;
   return ncclSuccess;
@@ -433,7 +447,7 @@ ncclResult_t ncclSharpRegMr(void* collComm, void* data, size_t size, int type, v
   }
   TRACE(NCCL_INIT,"sharpRegAddr %lx size %ld handle %x", data, size, mh->mr);
 
-  NCCLCHECK(ncclNetPlugin_v9.regMr(cComm->recvComm, data, size, type, &mh->ncclIbMr));
+  NCCLCHECK(ncclNetPlugin_v10.regMr(cComm->recvComm, data, size, type, &mh->ncclIbMr));
 
   *mhandle = mh;
    return ncclSuccess;
@@ -451,7 +465,7 @@ ncclResult_t ncclSharpDeregMr(void* collComm, void* mhandle) {
     WARN("SHARP deregmr failed\n");
   }
 
-  NCCLCHECK(ncclNetPlugin_v9.deregMr(cComm->recvComm, mh->ncclIbMr));
+  NCCLCHECK(ncclNetPlugin_v10.deregMr(cComm->recvComm, mh->ncclIbMr));
 
   free(mh);
   return ncclSuccess;
@@ -542,7 +556,7 @@ ncclResult_t ncclSharpIallreduce_v8(void* collComm, void* sendData, void* recvDa
 }
 
 
-ncclResult_t ncclSharpIallgather(void* collComm, void* sendData, int nRecvParts, ncclNetSGE_v9_t* recvParts,
+ncclResult_t ncclSharpIallgather(void* collComm, void* sendData, int nRecvParts, ncclNetSGE_v10_t* recvParts,
                              size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
                              void* sendMhandle, void** request)
 {
@@ -595,17 +609,17 @@ ncclResult_t ncclSharpIallgather(void* collComm, void* sendData, int nRecvParts,
 ncclResult_t ncclSharpIallgather_v8(void* collComm, void* sendData, int nRecvParts, ncclNetSGE_v8_t* recvParts,
                              size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
                              void* sendMhandle, void** request) {
-  ncclNetSGE_v9_t recvParts_v9;
-  recvParts_v9.mhandle = recvParts[0].mhandle;
-  recvParts_v9.address = recvParts[0].address;
-  recvParts_v9.size =(size_t)recvParts[0].size;
+  ncclNetSGE_v10_t recvParts_v10;
+  recvParts_v10.mhandle = recvParts[0].mhandle;
+  recvParts_v10.address = recvParts[0].address;
+  recvParts_v10.size =(size_t)recvParts[0].size;
 
-  return ncclSharpIallgather(collComm, sendData, nRecvParts, &recvParts_v9,
+  return ncclSharpIallgather(collComm, sendData, nRecvParts, &recvParts_v10,
 		  bytesPerRank, windowOffset, windowBytes, sendMhandle, request);
 }
 
 
-ncclResult_t ncclSharpIreducescatter(void* collComm, int nSendParts, ncclNetSGE_v9_t* sendParts, void* recvData,
+ncclResult_t ncclSharpIreducescatter(void* collComm, int nSendParts, ncclNetSGE_v10_t* sendParts, void* recvData,
                                  size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
                                  ncclDataType_t dataType, ncclRedOp_t redOp,
                                  void* recvMhandle, void** request)
@@ -678,12 +692,12 @@ ncclResult_t ncclSharpIreducescatter(void* collComm, int nSendParts, ncclNetSGE_
                                  size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
                                  ncclDataType_t dataType, ncclRedOp_t redOp,
                                  void* recvMhandle, void** request) {
-  ncclNetSGE_v9_t sendParts_v9;
-  sendParts_v9.mhandle = sendParts[0].mhandle;
-  sendParts_v9.address = sendParts[0].address;
-  sendParts_v9.size = (size_t)sendParts[0].size;
+  ncclNetSGE_v10_t sendParts_v10;
+  sendParts_v10.mhandle = sendParts[0].mhandle;
+  sendParts_v10.address = sendParts[0].address;
+  sendParts_v10.size = (size_t)sendParts[0].size;
 
-  return ncclSharpIreducescatter(collComm, nSendParts, &sendParts_v9,
+  return ncclSharpIreducescatter(collComm, nSendParts, &sendParts_v10,
 		  recvData, bytesPerRank, windowOffset, windowBytes, dataType, redOp,
 		  recvMhandle, request);
 }
@@ -696,7 +710,7 @@ ncclResult_t ncclSharpIflush(void* collComm, void* data, int size, void* mhandle
 
   NCCLCHECK(ncclSharpGetRequest(cComm->reqs, &req));
   req->requestType = NCCL_SHARP_REQ_IFLUSH;
-  ncclNetPlugin_v9.iflush(cComm->recvComm, 1, &data, &size, &mh->ncclIbMr, &req->sharpRequest);
+  ncclNetPlugin_v10.iflush(cComm->recvComm, 1, &data, &size, &mh->ncclIbMr, &req->sharpRequest);
   if (!req->sharpRequest) {
     *request = NULL;
      req->used = 0;
@@ -711,7 +725,7 @@ ncclResult_t ncclSharpTest(void* request, int* done, int* size) {
   struct ncclSharpRequest* req = (struct ncclSharpRequest*)request;
 
   if (req->requestType == NCCL_SHARP_REQ_IFLUSH) {
-    ncclNetPlugin_v9.test(req->sharpRequest, done, size);
+    ncclNetPlugin_v10.test(req->sharpRequest, done, size);
     if (*done == 1) {
       req->used = 0;
     }
@@ -745,8 +759,8 @@ ncclResult_t ncclSharpCloseColl(void* collComm) {
   sharp_coll_comm_destroy(cComm->sharpCollComm);
   sharp_coll_finalize(cComm->sharpCollContext);
 
-  NCCLCHECK(ncclNetPlugin_v9.closeRecv(cComm->recvComm));
-  NCCLCHECK(ncclNetPlugin_v9.closeSend(cComm->sendComm));
+  NCCLCHECK(ncclNetPlugin_v10.closeRecv(cComm->recvComm));
+  NCCLCHECK(ncclNetPlugin_v10.closeSend(cComm->sendComm));
   free(cComm);
   return ncclSuccess;
 }
@@ -755,11 +769,31 @@ ncclResult_t ncclSharpCloseListen(void* listenComm) {
   struct ncclSharpListenComm *lComm = (struct ncclSharpListenComm*)listenComm;
   ncclResult_t status;
 
-  status = ncclNetPlugin_v9.closeListen(lComm->listenCommP2P);
+  status = ncclNetPlugin_v10.closeListen(lComm->listenCommP2P);
   free(listenComm);
   return status;
 }
 
+ncclCollNet_v10_t ncclCollNetPlugin_v10 = {
+  "SHARP",
+  ncclSharpInit,
+  ncclSharpDevices,
+  ncclSharpGetProperties_v10,
+  ncclSharpListen,
+  ncclSharpConnect,
+  ncclSharpReduceSupport,
+  ncclSharpRegMr,
+  ncclSharpRegMrDmaBuf,
+  ncclSharpDeregMr,
+  ncclSharpIallreduce,
+  ncclSharpIallgather,
+  ncclSharpIreducescatter,
+  ncclSharpIflush,
+  ncclSharpTest,
+  ncclSharpCloseColl,
+  ncclSharpCloseListen,
+  NULL
+};
 ncclCollNet_v9_t ncclCollNetPlugin_v9 = {
   "SHARP",
   ncclSharpInit,

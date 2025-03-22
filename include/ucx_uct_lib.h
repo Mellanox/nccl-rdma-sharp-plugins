@@ -222,7 +222,7 @@ void nccl_uct_empty_callback(uct_completion_t *comp);
 ncclResult_t nccl_uct_listen(int dev, void *listen_handle, void **listen_comm);
 ncclResult_t nccl_uct_accept(void *listen_comm, void **recv_comm,
                              ncclNetDeviceHandle_v7_t **recvDevComm);
-ncclResult_t nccl_uct_connect(int dev, void *listen_handle, void **send_comm,
+ncclResult_t nccl_uct_connect(int dev, ncclNetCommConfig_t* config, void *listen_handle, void **send_comm,
                               ncclNetDeviceHandle_t **sendDevComm);
 ncclResult_t nccl_uct_close_listen(void *listen_comm);
 ncclResult_t nccl_uct_reg_mr_dmabuf(void *reg_comm, void *data, size_t size,
@@ -233,6 +233,8 @@ ncclResult_t nccl_uct_reg_mr(void *reg_comm, void *data, size_t size, int type,
 ncclResult_t nccl_uct_dereg_mr(void *dereg_comm, void *mhandle);
 
 /* Compatibility callback */
+ncclResult_t nccl_uct_get_properties_v9(int dev,
+                                        ncclNetProperties_v9_t *props_v9);
 ncclResult_t nccl_uct_get_properties_v8(int dev,
                                         ncclNetProperties_v8_t *props_v8);
 ncclResult_t nccl_uct_get_properties_v7(int dev,
@@ -241,17 +243,19 @@ ncclResult_t nccl_uct_reg_mr_v7(void *comm, void *data, int size, int type,
                                 void **mhandle);
 ncclResult_t nccl_uct_get_properties_v6(int dev,
                                         ncclNetProperties_v6_t *props_v6);
+ncclResult_t nccl_uct_connect_v9(int dev, void *listen_handle, void **send_comm,
+                              ncclNetDeviceHandle_t **sendDevComm);
 ncclResult_t nccl_uct_connect_v6(int dev, void *handle, void **send_comm);
 ncclResult_t nccl_uct_accept_v6(void *listen_comm, void **recv_comm);
 ncclResult_t nccl_uct_get_properties(int dev, ncclNetProperties_t *props);
 
 
-#define NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, get_properties_func, \
+#define NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, init_func, get_properties_func, \
                              connect_func, accept_func, reg_mr_func, \
                              isend_func, irecv_func) \
   { \
     .name          = plugin_name, \
-    .init          = prefix##_init, \
+    .init          = prefix##_##init_func, \
     .devices       = nccl_uct_devices, \
     .getProperties = get_properties_func, \
     .listen        = nccl_uct_listen, \
@@ -269,30 +273,35 @@ ncclResult_t nccl_uct_get_properties(int dev, ncclNetProperties_t *props);
     .closeListen   = nccl_uct_close_listen \
   }
 
-#define NCCL_UCT_PLUGIN_V9(plugin_name, prefix) \
-  NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, nccl_uct_get_properties, \
+#define NCCL_UCT_PLUGIN_V10(plugin_name, prefix) \
+  NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, init, nccl_uct_get_properties, \
                        nccl_uct_connect, nccl_uct_accept, nccl_uct_reg_mr, \
                        isend, irecv)
 
+#define NCCL_UCT_PLUGIN_V9(plugin_name, prefix) \
+  NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, init_v9, nccl_uct_get_properties_v9, \
+                       nccl_uct_connect_v9, nccl_uct_accept, nccl_uct_reg_mr, \
+                       isend_v9, irecv_v9)
+
 #define NCCL_UCT_PLUGIN_V8(plugin_name, prefix) \
-  NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, nccl_uct_get_properties_v8, \
-                       nccl_uct_connect, nccl_uct_accept, nccl_uct_reg_mr, \
+  NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, init_v9, nccl_uct_get_properties_v8, \
+                       nccl_uct_connect_v9, nccl_uct_accept, nccl_uct_reg_mr, \
                        isend_v8, irecv_v8)
 
 #define NCCL_UCT_PLUGIN_V7(plugin_name, prefix) \
-  NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, nccl_uct_get_properties_v7, \
-                       nccl_uct_connect, nccl_uct_accept, nccl_uct_reg_mr_v7, \
+  NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, init_v9, nccl_uct_get_properties_v7, \
+                       nccl_uct_connect_v9, nccl_uct_accept, nccl_uct_reg_mr_v7, \
                        isend_v8, irecv_v8)
 
 #define NCCL_UCT_PLUGIN_V6(plugin_name, prefix) \
-  NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, nccl_uct_get_properties_v6, \
+  NCCL_UCT_PLUGIN_BASE(plugin_name, prefix, init_v9,  nccl_uct_get_properties_v6, \
                        nccl_uct_connect_v6, nccl_uct_accept_v6, \
                        nccl_uct_reg_mr_v7, isend_v8, irecv_v8)
 
 #define NCCL_UCT_PLUGIN_V5(plugin_name, prefix) \
   { \
     .name          = plugin_name, \
-    .init          = prefix##_init, \
+    .init          = prefix##_init_v9, \
     .devices       = nccl_uct_devices, \
     .getProperties = nccl_uct_get_properties_v6, \
     .listen        = nccl_uct_listen, \
