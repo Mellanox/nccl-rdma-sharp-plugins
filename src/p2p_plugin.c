@@ -17,24 +17,28 @@
 #include "p2p_plugin.h"
 
 #ifdef HAVE_UCX_PLUGIN
+extern ncclNet_v10_t ucxPlugin_v10;
 extern ncclNet_v9_t ucxPlugin_v9;
 extern ncclNet_v8_t ucxPlugin_v8;
 extern ncclNet_v7_t ucxPlugin_v7;
 extern ncclNet_v6_t ucxPlugin_v6;
 extern ncclNet_v5_t ucxPlugin_v5;
 
+extern ncclNet_v10_t ucxRmaPlugin_v10;
 extern ncclNet_v9_t ucxRmaPlugin_v9;
 extern ncclNet_v8_t ucxRmaPlugin_v8;
 extern ncclNet_v7_t ucxRmaPlugin_v7;
 extern ncclNet_v6_t ucxRmaPlugin_v6;
 extern ncclNet_v5_t ucxRmaPlugin_v5;
 
+extern ncclNet_v10_t ucxUctPlugin_v10;
 extern ncclNet_v9_t ucxUctPlugin_v9;
 extern ncclNet_v8_t ucxUctPlugin_v8;
 extern ncclNet_v7_t ucxUctPlugin_v7;
 extern ncclNet_v6_t ucxUctPlugin_v6;
 extern ncclNet_v5_t ucxUctPlugin_v5;
 
+extern ncclNet_v10_t ucxUctRdPlugin_v10;
 extern ncclNet_v9_t ucxUctRdPlugin_v9;
 extern ncclNet_v8_t ucxUctRdPlugin_v8;
 extern ncclNet_v7_t ucxUctRdPlugin_v7;
@@ -42,6 +46,7 @@ extern ncclNet_v6_t ucxUctRdPlugin_v6;
 extern ncclNet_v5_t ucxUctRdPlugin_v5;
 #endif
 
+extern ncclNet_v10_t ibPlugin_v10;
 extern ncclNet_v9_t ibPlugin_v9;
 extern ncclNet_v8_t ibPlugin_v8;
 extern ncclNet_v7_t ibPlugin_v7;
@@ -62,11 +67,17 @@ extern int ncclIbRelaxedOrderingEnabled;
 NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
 NCCL_PARAM(IbAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
 
+ncclResult_t pluginInit_v10(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction);
 ncclResult_t pluginInit_v9(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v8(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v7(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v6(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v5(ncclDebugLogger_t logFunction);
+
+ncclNet_v10_t ncclNetPlugin_v10 = {
+  "NCCL RDMA Plugin v10",
+  pluginInit_v10,
+};
 
 ncclNet_v9_t ncclNetPlugin_v9 = {
   "NCCL RDMA Plugin v9",
@@ -125,6 +136,7 @@ static void pluginSetup()
   switch (p2p_plugin) {
 #ifdef HAVE_UCX_PLUGIN
     case NCCL_P2P_UCX:
+      ncclNetPlugin_v10 = ucxPlugin_v10;
       ncclNetPlugin_v9 = ucxPlugin_v9;
       ncclNetPlugin_v8 = ucxPlugin_v8;
       ncclNetPlugin_v7 = ucxPlugin_v7;
@@ -132,6 +144,7 @@ static void pluginSetup()
       ncclNetPlugin_v5 = ucxPlugin_v5;
       break;
     case NCCL_P2P_UCX_RMA:
+      ncclNetPlugin_v10 = ucxRmaPlugin_v10;
       ncclNetPlugin_v9 = ucxRmaPlugin_v9;
       ncclNetPlugin_v8 = ucxRmaPlugin_v8;
       ncclNetPlugin_v7 = ucxRmaPlugin_v7;
@@ -139,6 +152,7 @@ static void pluginSetup()
       ncclNetPlugin_v5 = ucxRmaPlugin_v5;
       break;
     case NCCL_P2P_UCX_UCT:
+      ncclNetPlugin_v10 = ucxUctPlugin_v10;
       ncclNetPlugin_v9 = ucxUctPlugin_v9;
       ncclNetPlugin_v8 = ucxUctPlugin_v8;
       ncclNetPlugin_v7 = ucxUctPlugin_v7;
@@ -146,6 +160,7 @@ static void pluginSetup()
       ncclNetPlugin_v5 = ucxUctPlugin_v5;
       break;
     case NCCL_P2P_UCX_UCT_RD:
+      ncclNetPlugin_v10 = ucxUctRdPlugin_v10;
       ncclNetPlugin_v9 = ucxUctRdPlugin_v9;
       ncclNetPlugin_v8 = ucxUctRdPlugin_v8;
       ncclNetPlugin_v7 = ucxUctRdPlugin_v7;
@@ -154,6 +169,7 @@ static void pluginSetup()
       break;
 #endif
     default:
+      ncclNetPlugin_v10 = ibPlugin_v10;
       ncclNetPlugin_v9 = ibPlugin_v9;
       ncclNetPlugin_v8 = ibPlugin_v8;
       ncclNetPlugin_v7 = ibPlugin_v7;
@@ -164,13 +180,19 @@ static void pluginSetup()
 
 }
 
+ncclResult_t pluginInit_v10(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+  pluginLogFunction = logFunction;
+  pluginSetup();
+  INFO(NCCL_INIT|NCCL_NET, "P2P plugin v10 %s", ncclNetPlugin_v10.name);
+  return ncclNetPlugin_v10.init(logFunction, profFunction);
+}
+
 ncclResult_t pluginInit_v9(ncclDebugLogger_t logFunction) {
   pluginLogFunction = logFunction;
   pluginSetup();
   INFO(NCCL_INIT|NCCL_NET, "P2P plugin v9 %s", ncclNetPlugin_v9.name);
   return ncclNetPlugin_v9.init(logFunction);
 }
-
 
 ncclResult_t pluginInit_v8(ncclDebugLogger_t logFunction) {
   pluginLogFunction = logFunction;
@@ -449,8 +471,8 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props, int
     }
     ncclIbDev* dev = ncclIbDevs + props->devs[i];
     if (dev->link != dev0->link) {
-      WARN("NET/IB : Trying to merge multiple devices together with different link_layer properties %s -> %d, %s -> %d. Try only selecting NICs with one type of link using NCCL_IB_HCA",
-        dev0->devName, dev0->link, dev->devName, dev->link);
+      WARN("NET/IB : Attempted to merge incompatible devices: [%d]%s:%d/%s and [%d]%s:%d/%s. Try selecting NICs of only one link type using NCCL_IB_HCA",
+        props->devs[0], dev0->devName, dev0->portNum, NCCL_IB_LLSTR(dev0->link), props->devs[i], dev->devName, dev->portNum, NCCL_IB_LLSTR(dev->link)); 
       return ncclInvalidUsage;
     }
   }
@@ -487,7 +509,7 @@ ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, ch
       int nIbDevs;
       struct ibv_device** devices;
       // Check if user defined which IB device:port to use
-      char* userIbEnv = getenv("NCCL_IB_HCA");
+      const char* userIbEnv = ncclGetEnv("NCCL_IB_HCA");
       struct netIf userIfs[MAX_IB_DEVS];
       int searchNot = userIbEnv && userIbEnv[0] == '^';
       if (searchNot) userIbEnv++;
@@ -554,7 +576,7 @@ ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, ch
             ncclNSharpDevs++;
           }
           TRACE(NCCL_NET,"NET/IB: [%d] %s:%s:%d/%s speed=%d context=%p pciPath=%s ar=%d", d, devices[d]->name, devices[d]->dev_name, ncclIbDevs[ncclNIbDevs].portNum,
-            portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE", ncclIbDevs[ncclNIbDevs].speed, context, ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar);
+            NCCL_IB_LLSTR(portAttr.link_layer),, ncclIbDevs[ncclNIbDevs].speed, context, ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar);
           if (ncclIbAsyncThread != NULL) {
             PTHREADCHECKGOTO(pthread_create(ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs), "pthread_create", ret, fail);
             ncclSetThreadName(*ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
@@ -588,11 +610,11 @@ ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, ch
     for (int d = 0; d < ncclNIbDevs; d++) {
 #ifdef HAVE_SHARP_PLUGIN
             snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s%s", d, ncclIbDevs[d].devName,
-              ncclIbDevs[d].portNum, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE",
+              ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link),
               ncclIbDevs[d].isSharpDev ? "/SHARP" : "");
 #else
       snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
-        ncclIbDevs[d].portNum, ncclIbDevs[d].link == IBV_LINK_LAYER_INFINIBAND ? "IB" : "RoCE");
+        ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link));
 #endif
     }
     char addrline[SOCKET_NAME_MAXLEN+1];

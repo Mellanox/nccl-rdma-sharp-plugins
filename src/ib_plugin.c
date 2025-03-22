@@ -37,6 +37,9 @@ int ncclIbRelaxedOrderingEnabled = 0;
 static int ncclNMergedIbDevs = -1;
 static int ncclNIbDevs = -1;
 
+#define NCCL_IB_SL_DEFAULT 0
+#define NCCL_IB_TC_DEFAULT 0
+
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
 NCCL_PARAM(IbRoceVersionNum, "IB_ROCE_VERSION_NUM", 2);
@@ -45,7 +48,7 @@ NCCL_PARAM(IbTimeout, "IB_TIMEOUT", 20);
 NCCL_PARAM(IbRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbPkey, "IB_PKEY", 0);
 NCCL_PARAM(IbUseInline, "IB_USE_INLINE", 0);
-NCCL_PARAM(IbSl, "IB_SL", 0);
+NCCL_PARAM(IbSl, "IB_SL", -1);
 NCCL_PARAM(IbTc, "IB_TC", -1);
 NCCL_PARAM(IbArThreshold, "IB_AR_THRESHOLD", 8192);
 NCCL_PARAM(IbPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 2);
@@ -221,6 +224,9 @@ static ncclResult_t ncclIbRoceGetVersionNum(const char* deviceName, int portNum,
   close(fd);
 
   if (ret == -1) {
+    // In containerized environments, read could return EINVAL if the GID index is not mapped to the
+    // container sysfs. In this case return nc
+    if (errno == EINVAL) return ncclSuccess;
     WARN("NET/IB: read failed in ncclIbRoceGetVersionNum: %s", strerror(errno));
     return ncclSystemError;
   }
@@ -253,7 +259,7 @@ static ncclResult_t ncclUpdateGidIndex(struct ibv_context* context, uint8_t port
       return ncclSuccess;
     }
     int usrRoceVer = roceVer;
-    int gidRoceVerNum, gidRoceVerNumCandidate;
+    int gidRoceVerNum, gidRoceVerNumCandidate = -1;
     const char* deviceName = wrap_ibv_get_device_name(context->device);
     NCCLCHECK(ncclIbRoceGetVersionNum(deviceName, portNum, *gidIndex, &gidRoceVerNum));
     NCCLCHECK(ncclIbRoceGetVersionNum(deviceName, portNum, gidIndexCandidate, &gidRoceVerNumCandidate));
@@ -330,6 +336,33 @@ ncclResult_t ncclIbDevices(int* ndev) {
 ncclResult_t ncclIbGetProperties(int dev, ncclNetProperties_t* props)
 {
   return nccl_p2p_ib_get_properties(ncclIbDevs, ncclNMergedIbDevs, dev, props);
+}
+
+
+ncclResult_t ncclIbGetProperties_v9(int dev, ncclNetProperties_v9_t* props_v9) {
+  ncclNetProperties_t props;
+  ncclResult_t ret = nccl_p2p_ib_get_properties(ncclIbDevs, ncclNMergedIbDevs, dev, &props);
+  if (ret != ncclSuccess) return ret;
+  props_v9->name = props.name;
+  props_v9->pciPath = props.pciPath;
+  props_v9->guid = props.guid;
+  props_v9->ptrSupport = props.ptrSupport;
+  props_v9->regIsGlobal = props.regIsGlobal;
+  props_v9->forceFlush = props.forceFlush;
+  props_v9->speed = props.speed;
+  props_v9->port = props.port;
+  props_v9->latency = props.latency;
+  props_v9->maxComms = props.maxComms;
+  props_v9->maxRecvs = props.maxRecvs;
+  props_v9->netDeviceType = props.netDeviceType;
+  props_v9->netDeviceVersion = props.netDeviceVersion;
+  props_v9->maxP2pBytes = props.maxP2pBytes;
+  props_v9->maxCollBytes = props.maxCollBytes;
+  props_v9->vProps.ndevs = props.vProps.ndevs;
+  for(int i=0; i<props.vProps.ndevs; i++) {
+    props_v9->vProps.devs[i] = props.vProps.devs[i];
+  }
+  return ncclSuccess;
 }
 
 ncclResult_t ncclIbGetProperties_v8(int dev, ncclNetProperties_v8_t* props_v8)
@@ -427,6 +460,8 @@ typedef struct ncclIbConnectionMetadata {
   char devName[MAX_MERGED_DEV_NAME];
   uint64_t fifoAddr;
   int ndevs;
+  int tc;
+  int sl;
 } ncclIbConnectionMetadata;
 
 enum ncclIbCommState {
@@ -569,7 +604,7 @@ struct ncclIbRecvComm {
   int flushEnabled;
 };
 
-ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction) {
+ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
   if (ncclParamIbDisable()) return ncclInternalError;
 
   // The SendFifo needs to be 32-byte aligned and each element needs
@@ -655,7 +690,7 @@ ncclResult_t ncclIbCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base, 
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbRtrQp(struct ibv_qp* qp, struct ncclIbGidInfo* sGidInfo, uint32_t dest_qp_num, struct ncclIbDevInfo* info, bool fifoTc) {
+ncclResult_t ncclIbRtrQp(struct ibv_qp* qp, struct ncclIbGidInfo* sGidInfo, uint32_t dest_qp_num, struct ncclIbDevInfo* info, bool fifoTc, int tc, int sl) {
   struct ibv_qp_attr qpAttr;
   int same_subnet;
   memset(&qpAttr, 0, sizeof(struct ibv_qp_attr));
@@ -672,7 +707,7 @@ ncclResult_t ncclIbRtrQp(struct ibv_qp* qp, struct ncclIbGidInfo* sGidInfo, uint
     qpAttr.ah_attr.grh.flow_label = 0;
     qpAttr.ah_attr.grh.sgid_index = sGidInfo->localGidIndex;
     qpAttr.ah_attr.grh.hop_limit = 255;
-    qpAttr.ah_attr.grh.traffic_class = fifoTc && ncclParamIbFifoTc() != -1 ? ncclParamIbFifoTc() : ncclParamIbTc();
+    qpAttr.ah_attr.grh.traffic_class = fifoTc && ncclParamIbFifoTc() != -1 ? ncclParamIbFifoTc() : tc;
   } else {
     same_subnet = (ncclIbExtractLocalSubnetPrefix(sGidInfo->localGid.global.subnet_prefix) ==
                    ncclIbExtractLocalSubnetPrefix(info->gid.global.subnet_prefix));
@@ -695,10 +730,10 @@ ncclResult_t ncclIbRtrQp(struct ibv_qp* qp, struct ncclIbGidInfo* sGidInfo, uint
       qpAttr.ah_attr.grh.hop_limit = 255;
     }
   }
-  qpAttr.ah_attr.sl = ncclParamIbSl();
+  qpAttr.ah_attr.sl = sl;
   qpAttr.ah_attr.src_path_bits = 0;
   qpAttr.ah_attr.port_num = info->ib_port;
-  TRACE(NCCL_NET, "NET/IB : ncclIbRtrQp qpn=%u mtu=%d dst=%u ll=%u port=%u", qp->qp_num, info->mtu, dest_qp_num, info->link_layer, info->ib_port);
+  TRACE(NCCL_NET, "NET/IB : ncclIbRtrQp qpn=%u mtu=%d dst=%u ll=%u port=%u sl: %d tc: %d", qp->qp_num, info->mtu, dest_qp_num, info->link_layer, info->ib_port, qpAttr.ah_attr.sl, qpAttr.ah_attr.grh.traffic_class);
   NCCLCHECK(wrap_ibv_modify_qp(qp, &qpAttr, IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER));
   return ncclSuccess;
 }
@@ -733,18 +768,19 @@ ncclResult_t ncclIbListen(int dev, void* opaqueHandle, void** listenComm) {
 exit:
   return ret;
 fail:
-  (void)ncclSocketClose(&comm->sock);
+  (void)ncclSocketClose(&comm->sock, false);
   free(comm);
   goto exit;
 }
 
-ncclResult_t ncclIbConnect(int dev, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** sendDevComm) {
+ncclResult_t ncclIbConnect(int dev, ncclNetCommConfig_t* config, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** sendDevComm) {
   ncclResult_t ret = ncclSuccess;
   struct ncclIbHandle* handle = (struct ncclIbHandle*) opaqueHandle;
   struct ncclIbCommStage* stage = &handle->stage;
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)stage->comm;
   struct ncclIbConnectionMetadata remMeta;
   int ready;
+  uint8_t link_layer = IBV_LINK_LAYER_UNSPECIFIED;
   *sendComm = NULL;
 
   if (stage->state == ncclIbCommStateConnect)      goto ib_connect_check;
@@ -774,7 +810,7 @@ ib_connect_check:
   // IB Setup
   struct ncclIbMergedDev* mergedDev;
   if (dev >= ncclNMergedIbDevs) {
-    WARN("NET/IB : Trying to use non-existant virtual device %d", dev);
+    WARN("NET/IB : Trying to use non-existent virtual device %d", dev);
     return ncclInternalError;
   }
 
@@ -886,9 +922,18 @@ ib_recv_dev_list:
           devInfo->gid.global.subnet_prefix, devInfo->gid.global.interface_id, devInfo->fifoRkey, commDev->fifoMr->lkey);
       }
     }
+    if (link_layer == IBV_LINK_LAYER_UNSPECIFIED) link_layer = devInfo->link_layer;
+    if (link_layer != devInfo->link_layer) {
+      int ibDev0 = comm->devs[0].base.ibDevN;
+      WARN("NET/IB : Attempted to connect incompatible devices: [%d]%s:%d/%s and [%d]%s:%d/%s. Try selecting NICs of only one link type using NCCL_IB_HCA",
+           commDev->base.ibDevN, ibDev->devName, ibDev->portNum, NCCL_IB_LLSTR(ibDev->portAttr.link_layer), ibDev0, ncclIbDevs[ibDev0].devName, ncclIbDevs[ibDev0].portNum, NCCL_IB_LLSTR(link_layer));
+      return ncclInternalError;
+    }
   }
 
   meta.fifoAddr = (uint64_t)comm->fifo;
+  meta.sl = (ncclParamIbSl() != -1) ? ncclParamIbSl() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_SL_DEFAULT;
+  meta.tc = (ncclParamIbTc() != -1) ? ncclParamIbTc() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
 
   stage->state = ncclIbCommStateSend;
@@ -914,13 +959,16 @@ ib_connect:
 
   comm->base.nRemDevs = remMeta.ndevs;
 
-  int link_layer;
-  link_layer = remMeta.devs[0].link_layer;
-  for (int i = 1; i < remMeta.ndevs; i++) {
-    if (remMeta.devs[i].link_layer != link_layer) {
-      WARN("NET/IB : Can't connect net devices with different link_layer. i=%d remMeta.ndevs=%d link_layer=%d rem_link_layer=%d",
-      i, remMeta.ndevs, link_layer, remMeta.devs[i].link_layer);
-      return ncclInternalError;
+  // ensure that the remote devices have the same link layer than the local devices used in the connection.
+  if (comm->base.vProps.ndevs > 0) {
+    int ibDev0 = comm->devs[0].base.ibDevN;
+    link_layer = ncclIbDevs[ibDev0].portAttr.link_layer;
+    for (int i = 0; i < remMeta.ndevs; i++) {
+      if (remMeta.devs[i].link_layer != link_layer) {
+        WARN("NET/IB : Remote %s device is incompatible with the local [%d]%s:%d/%s. Try selecting NICs of only one link type using NCCL_IB_HCA",
+             NCCL_IB_LLSTR(remMeta.devs[i].link_layer), ibDev0, ncclIbDevs[ibDev0].devName, ncclIbDevs[ibDev0].portNum, NCCL_IB_LLSTR(link_layer));
+        return ncclInternalError;
+      }
     }
   }
 
@@ -954,7 +1002,7 @@ ib_connect:
 
     ncclIbDev* ibDev = ncclIbDevs + commDev->base.ibDevN;
     remDevInfo->mtu = MIN(remDevInfo->mtu, ibDev->portAttr.active_mtu);
-    NCCLCHECKGOTO(ncclIbRtrQp(qp, &commDev->base.gidInfo, remQpInfo->qpn, remDevInfo, false), ret, fail);
+    NCCLCHECKGOTO(ncclIbRtrQp(qp, &commDev->base.gidInfo, remQpInfo->qpn, remDevInfo, false, remMeta.tc, remMeta.sl), ret, fail);
     NCCLCHECKGOTO(ncclIbRtsQp(qp), ret, fail);
   }
 
@@ -986,11 +1034,6 @@ exit:
 fail:
   free(comm);
   goto exit;
-}
-
-ncclResult_t ncclIbConnect_v6(int dev, void* opaqueHandle, void** sendComm) {
-  ncclNetDeviceHandle_v7_t* handle = NULL;
-  return ncclIbConnect(dev, opaqueHandle, sendComm, &handle);
 }
 
 NCCL_PARAM(IbWarnRailLocal, "IB_WARN_RAIL_LOCAL", 0);
@@ -1045,6 +1088,7 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm,  ncclNetDeviceHandl
   struct ncclIbCommStage* stage = &lComm->stage;
   struct ncclIbRecvComm* rComm = (struct ncclIbRecvComm*)stage->comm;
   int ready;
+  int link_layer = IBV_LINK_LAYER_UNSPECIFIED;
   *recvComm = NULL;
 
   if (stage->state == ncclIbCommStateAccept)   goto ib_accept_check;
@@ -1083,7 +1127,7 @@ ib_recv_dev_list:
   ncclNetVDeviceProps_t remoteVProps;
   memcpy(&remoteVProps, stage->buffer, sizeof(ncclNetVDeviceProps_t));
   if (lComm->dev >= ncclNMergedIbDevs) {
-    WARN("NET/IB : Trying to use non-existant virtual device %d", lComm->dev);
+    WARN("NET/IB : Trying to use non-existent virtual device %d", lComm->dev);
     return ncclInternalError;
   }
 
@@ -1142,6 +1186,13 @@ ib_recv:
     ibDev = ncclIbDevs + ibDevN;
     NCCLCHECKGOTO(ncclIbGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr, &rCommDev->base.gidInfo.localGidIndex), ret, fail);
     NCCLCHECKGOTO(wrap_ibv_query_gid(ibDev->context, ibDev->portNum, rCommDev->base.gidInfo.localGidIndex, &rCommDev->base.gidInfo.localGid), ret, fail);
+    if (link_layer == IBV_LINK_LAYER_UNSPECIFIED) link_layer = ibDev->portAttr.link_layer;
+    if (link_layer != ibDev->portAttr.link_layer) {
+      int ibDev0 = rComm->devs[0].base.ibDevN;
+      WARN("NET/IB : Attempted to connect incompatible devices: [%d]%s:%d/%s and [%d]%s:%d/%s. Try selecting NICs of only one link type using NCCL_IB_HCA",
+           ibDevN, ibDev->devName, ibDev->portNum, NCCL_IB_LLSTR(ibDev->portAttr.link_layer), ibDev0, ncclIbDevs[ibDev0].devName, ncclIbDevs[ibDev0].portNum, NCCL_IB_LLSTR(link_layer));
+      return ncclInternalError;
+    }
   }
 
   // Copy remDevInfo for things like remGidInfo, remFifoAddr, etc.
@@ -1149,6 +1200,12 @@ ib_recv:
     rComm->base.remDevs[i] = remMeta.devs[i];
     rComm->base.remDevs[i].remoteGid.global.interface_id  = rComm->base.remDevs[i].gid.global.interface_id;
     rComm->base.remDevs[i].remoteGid.global.subnet_prefix = rComm->base.remDevs[i].gid.global.subnet_prefix;
+    if (remMeta.devs[i].link_layer != link_layer) {
+      int ibDev0 = rComm->devs[0].base.ibDevN;
+      WARN("NET/IB : Remote %s device is incompatible with the local [%d]%s:%d/%s. Try selecting NICs of only one link type using NCCL_IB_HCA",
+           NCCL_IB_LLSTR(remMeta.devs[i].link_layer), ibDev0, ncclIbDevs[ibDev0].devName, ncclIbDevs[ibDev0].portNum, NCCL_IB_LLSTR(link_layer));
+      return ncclInternalError;
+    }
   }
 
   // Stripe QP creation across merged devs
@@ -1185,7 +1242,7 @@ ib_recv:
     } else {
       meta.qpInfo[q].ece_supported = 0;
     }
-    NCCLCHECKGOTO(ncclIbRtrQp(qp->qp, &rCommDev->base.gidInfo, remMeta.qpInfo[q].qpn, remDevInfo, true), ret, fail);
+    NCCLCHECKGOTO(ncclIbRtrQp(qp->qp, &rCommDev->base.gidInfo, remMeta.qpInfo[q].qpn, remDevInfo, true, remMeta.tc, remMeta.sl), ret, fail);
     NCCLCHECKGOTO(ncclIbRtsQp(qp->qp), ret, fail);
   }
 
@@ -1221,7 +1278,7 @@ ib_recv:
 #endif
       );
       devInfo.mtu         = ibDev->portAttr.active_mtu;
-      NCCLCHECKGOTO(ncclIbRtrQp(rCommDev->gpuFlush.qp.qp, &rCommDev->base.gidInfo, rCommDev->gpuFlush.qp.qp->qp_num, &devInfo, false), ret, fail);
+      NCCLCHECKGOTO(ncclIbRtrQp(rCommDev->gpuFlush.qp.qp, &rCommDev->base.gidInfo, rCommDev->gpuFlush.qp.qp->qp_num, &devInfo, false, remMeta.tc, remMeta.sl), ret, fail);
       NCCLCHECKGOTO(ncclIbRtsQp(rCommDev->gpuFlush.qp.qp), ret, fail);
     }
 
@@ -1245,6 +1302,8 @@ ib_recv:
     meta.devs[i].fifoRkey = rComm->devs[i].sizesFifoMr->rkey;
   }
   meta.fifoAddr = (uint64_t)rComm->sizesFifo;
+  meta.sl = remMeta.sl;
+  meta.tc = remMeta.tc;
 
   for (int q = 0; q < rComm->base.nqps; q++) {
     meta.qpInfo[q].qpn      = rComm->base.qps[q].qp->qp_num;
@@ -1286,11 +1345,6 @@ exit:
 fail:
   free(rComm);
   goto exit;
-}
-
-ncclResult_t ncclIbAccept_v6(void* listenComm, void** recvComm) {
-  ncclNetDeviceHandle_v7_t* handle = NULL;
-  return ncclIbAccept(listenComm, recvComm, &handle);
 }
 
 ncclResult_t ncclIbGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req) {
@@ -1405,10 +1459,6 @@ ncclResult_t ncclIbRegMr(void* comm, void* data, size_t size, int type, void** m
   return ncclIbRegMrDmaBuf(comm, data, size, type, 0ULL, -1, mhandle);
 }
 
-ncclResult_t ncclIbRegMr_v7(void* comm, void* data, int size, int type, void** mhandle) {
-  return ncclIbRegMrDmaBuf(comm, data, (size_t)size, type, 0ULL, -1, mhandle);
-}
-
 ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, struct ibv_mr* mhandle) {
   struct ncclIbMrCache* cache = &ncclIbDevs[base->ibDevN].mrCache;
   ncclResult_t res;
@@ -1451,7 +1501,7 @@ ncclResult_t ncclIbDeregMr(void* comm, void* mhandle) {
 
 NCCL_PARAM(IbSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
 
-ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
+ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot,  void* pHandle) {
   struct ncclIbRequest** reqs = comm->fifoReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->fifo[slot];
   int nreqs = slots[0].nreqs;
@@ -1555,7 +1605,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void** request) {
+ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle, void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   if (comm->base.ready == 0) { WARN("NET/IB: ncclIbIsend() called when comm->base.ready == 0"); return ncclInternalError; }
   if (comm->base.ready == 0) { *request = NULL; return ncclSuccess; }
@@ -1626,7 +1676,7 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
     }
 
     TIME_START(0);
-    NCCLCHECK(ncclIbMultiSend(comm, slot));
+    NCCLCHECK(ncclIbMultiSend(comm, slot, phandle));
 
     // Clear slots[0]->nreqs, as well as other fields to help debugging and sanity checks
     memset((void*)slots, 0, sizeof(struct ncclIbSendFifo));
@@ -1720,7 +1770,7 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** request) {
+ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles, void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   if (comm->base.ready == 0) { WARN("NET/IB: ncclIbIrecv() called when comm->base.ready == 0"); return ncclInternalError; }
   if (comm->base.ready == 0) { *request = NULL; return ncclSuccess; }
@@ -1766,18 +1816,6 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   *request = req;
   return ncclSuccess;
-}
-
-ncclResult_t ncclIbIsend_v8(void* sendComm, void* data, int size, int tag, void* mhandle, void** request)
-{
-  return ncclIbIsend(sendComm, data, (size_t)size, tag, mhandle, request);
-}
-
-ncclResult_t ncclIbIrecv_v8(void* recvComm, int n, void** data, int* sizes, int* tags, void** mhandles, void** request)
-{
-  size_t sizesOut[NCCL_NET_IB_MAX_RECVS];
-  for (int i=0; i<n; i++) sizesOut[i] = sizes[i];
-  return ncclIbIrecv(recvComm, 1, data, sizesOut, tags, mhandles, request);
 }
 
 ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request) {
@@ -1838,7 +1876,8 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
       if (sizes && r->type == NCCL_NET_IB_REQ_SEND) {
         sizes[0] = r->send.size;
       }
-
+     
+      // Stop all remaining Qp events for this event
       NCCLCHECK(ncclIbFreeRequest(r));
       return ncclSuccess;
     }
@@ -1920,7 +1959,7 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
 ncclResult_t ncclIbCloseSend(void* sendComm) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   if (comm) {
-    NCCLCHECK(ncclSocketClose(&comm->base.sock));
+    NCCLCHECK(ncclSocketClose(&comm->base.sock, false));
 
     for (int q = 0; q < comm->base.nqps; q++)
       if (comm->base.qps[q].qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
@@ -1940,7 +1979,7 @@ ncclResult_t ncclIbCloseSend(void* sendComm) {
 ncclResult_t ncclIbCloseRecv(void* recvComm) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   if (comm) {
-    NCCLCHECK(ncclSocketClose(&comm->base.sock));
+    NCCLCHECK(ncclSocketClose(&comm->base.sock, false));
 
     for (int q = 0; q < comm->base.nqps; q++)
       if (comm->base.qps[q].qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
@@ -1963,7 +2002,7 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
 ncclResult_t ncclIbCloseListen(void* listenComm) {
   struct ncclIbListenComm* comm = (struct ncclIbListenComm*)listenComm;
   if (comm) {
-    NCCLCHECK(ncclSocketClose(&comm->sock));
+    NCCLCHECK(ncclSocketClose(&comm->sock, false));
     free(comm);
   }
   return ncclSuccess;
@@ -1976,8 +2015,51 @@ ncclResult_t ncclIbMakeVDevice(int* d, ncclNetVDeviceProps_t* props) {
   return res;
 }
 
-const ncclNet_v9_t ibPlugin_v9 = {
-  .name = "IBext_v9",
+ncclResult_t ncclIbConnect_v9(int dev, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** sendDevComm) {
+  return ncclIbConnect(dev, NULL, opaqueHandle, sendComm, sendDevComm);
+}
+
+ncclResult_t ncclIbInit_v9(ncclDebugLogger_t logFunction) {
+  return ncclIbInit(logFunction, NULL);
+}
+
+ncclResult_t ncclIbIsend_v9(void* sendComm, void* data, size_t size, int tag, void* mhandle, void** request) {
+  return ncclIbIsend(sendComm, data, size, tag, mhandle, NULL, request);
+}
+
+ncclResult_t ncclIbIrecv_v9(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** request) {
+  return ncclIbIrecv(recvComm, n, data, sizes, tags, mhandles, NULL, request);
+}
+
+ncclResult_t ncclIbIsend_v8(void* sendComm, void* data, int size, int tag, void* mhandle, void** request)
+{
+  return ncclIbIsend_v9(sendComm, data, (size_t)size, tag, mhandle, request);
+}
+
+ncclResult_t ncclIbIrecv_v8(void* recvComm, int n, void** data, int* sizes, int* tags, void** mhandles, void** request)
+{
+  size_t sizesOut[NCCL_NET_IB_MAX_RECVS];
+  for (int i=0; i<n; i++) sizesOut[i] = sizes[i];
+  return ncclIbIrecv_v9(recvComm, 1, data, sizesOut, tags, mhandles, request);
+}
+
+ncclResult_t ncclIbRegMr_v7(void* comm, void* data, int size, int type, void** mhandle) {
+  return ncclIbRegMrDmaBuf(comm, data, (size_t)size, type, 0ULL, -1, mhandle);
+}
+
+ncclResult_t ncclIbConnect_v6(int dev, void* opaqueHandle, void** sendComm) {
+  ncclNetDeviceHandle_v7_t* handle = NULL;
+  return ncclIbConnect_v9(dev, opaqueHandle, sendComm, &handle);
+}
+
+ncclResult_t ncclIbAccept_v6(void* listenComm, void** recvComm) {
+  ncclNetDeviceHandle_v7_t* handle = NULL;
+  return ncclIbAccept(listenComm, recvComm, &handle);
+}
+
+
+const ncclNet_v10_t ibPlugin_v10 = {
+  .name = "IBext_v10",
   .init = ncclIbInit,
   .devices = ncclIbDevices,
   .getProperties = ncclIbGetProperties,
@@ -1999,14 +2081,37 @@ const ncclNet_v9_t ibPlugin_v9 = {
   ncclIbMakeVDevice
 };
 
+const ncclNet_v9_t ibPlugin_v9 = {
+  .name = "IBext_v9",
+  .init = ncclIbInit_v9,
+  .devices = ncclIbDevices,
+  .getProperties = ncclIbGetProperties_v9,
+  .listen = ncclIbListen,
+  .connect = ncclIbConnect_v9,
+  .accept = ncclIbAccept,
+  .regMr = ncclIbRegMr,
+  .regMrDmaBuf = ncclIbRegMrDmaBuf,
+  .deregMr = ncclIbDeregMr,
+  .isend = ncclIbIsend_v9,
+  .irecv = ncclIbIrecv_v9,
+  .iflush = ncclIbIflush,
+  .test = ncclIbTest,
+  .closeSend = ncclIbCloseSend,
+  .closeRecv = ncclIbCloseRecv,
+  .closeListen = ncclIbCloseListen,
+  .getDeviceMr = NULL,
+  .irecvConsumed = NULL,
+  .makeVDevice = ncclIbMakeVDevice,
+};
+
 
 const ncclNet_v8_t ibPlugin_v8 = {
   .name = "IBext_v8",
-  .init = ncclIbInit,
+  .init = ncclIbInit_v9,
   .devices = ncclIbDevices,
   .getProperties = ncclIbGetProperties_v8,
   .listen = ncclIbListen,
-  .connect = ncclIbConnect,
+  .connect = ncclIbConnect_v9,
   .accept = ncclIbAccept,
   .regMr = ncclIbRegMr,
   .regMrDmaBuf = ncclIbRegMrDmaBuf,
@@ -2024,11 +2129,11 @@ const ncclNet_v8_t ibPlugin_v8 = {
 
 const ncclNet_v7_t ibPlugin_v7 = {
   .name = "IBext_v7",
-  .init = ncclIbInit,
+  .init = ncclIbInit_v9,
   .devices = ncclIbDevices,
   .getProperties = ncclIbGetProperties_v7,
   .listen = ncclIbListen,
-  .connect = ncclIbConnect,
+  .connect = ncclIbConnect_v9,
   .accept = ncclIbAccept,
   .regMr = ncclIbRegMr_v7,
   .regMrDmaBuf = ncclIbRegMrDmaBuf,
@@ -2046,7 +2151,7 @@ const ncclNet_v7_t ibPlugin_v7 = {
 
 const ncclNet_v6_t ibPlugin_v6 = {
   .name = "IBext_v6",
-  .init = ncclIbInit,
+  .init = ncclIbInit_v9,
   .devices = ncclIbDevices,
   .getProperties = ncclIbGetProperties_v6,
   .listen = ncclIbListen,
@@ -2066,7 +2171,7 @@ const ncclNet_v6_t ibPlugin_v6 = {
 
 const ncclNet_v5_t ibPlugin_v5 = {
   .name = "IBext_v5",
-  .init = ncclIbInit,
+  .init = ncclIbInit_v9,
   .devices = ncclIbDevices,
   .getProperties = ncclIbGetProperties_v6,
   .listen = ncclIbListen,

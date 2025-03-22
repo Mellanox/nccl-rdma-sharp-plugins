@@ -222,7 +222,7 @@ static ncclResult_t nccl_uct_rd_comm_init(nccl_uct_comm_t *base_comm,
   return nccl_uct_comm_init(&comm->base, context, worker, dev, remote_comm);
 }
 
-static ncclResult_t nccl_uct_rd_init(ncclDebugLogger_t logFunction) {
+static ncclResult_t nccl_uct_rd_init(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
   NCCL_STATIC_ASSERT(NCCL_UCT_RING_SIZE >= 2 * MAX_REQUESTS,
                      "Cannot handle expected/unexpected requests");
   NCCL_STATIC_ASSERT(NCCL_UCT_PENDING_SIZE > MAX_REQUESTS,
@@ -269,7 +269,7 @@ static inline void nccl_uct_rd_req_free(nccl_uct_rd_req_t *req) {
 }
 
 static ncclResult_t nccl_uct_rd_isend(void *send_comm, void *data, size_t size,
-                                      int tag, void *mhandle, void **request) {
+                                      int tag, void *mhandle, void* phandle, void **request) {
 
   nccl_uct_rd_comm_t *comm  = nccl_uct_rd_comm_get(send_comm);
   nccl_uct_memh_t *uct_memh = mhandle;
@@ -304,14 +304,9 @@ static ncclResult_t nccl_uct_rd_isend(void *send_comm, void *data, size_t size,
   return ncclSuccess;
 }
 
-static ncclResult_t nccl_uct_rd_isend_v8(void *send_comm, void *data, int size,
-                                      int tag, void *mhandle, void **request) {
-  return nccl_uct_rd_isend(send_comm, data, (size_t)size, tag, mhandle, request);
-}
-
 static ncclResult_t nccl_uct_rd_irecv(void *recv_comm, int n, void **data,
                                       size_t *sizes, int *tags, void **mhandles,
-                                      void **request) {
+                                      void** phandles, void **request) {
   nccl_uct_rd_comm_t *comm   = nccl_uct_rd_comm_get(recv_comm);
   nccl_uct_memh_t **uct_memh = (nccl_uct_memh_t**)mhandles;
   nccl_uct_ring_t *unexp;
@@ -353,14 +348,6 @@ static ncclResult_t nccl_uct_rd_irecv(void *recv_comm, int n, void **data,
   }
 
   return ncclSuccess;
-}
-
-static ncclResult_t nccl_uct_rd_irecv_v8(void *recv_comm, int n, void **data,
-                                      int *sizes, int *tags, void **mhandles,
-                                      void **request) {
-  size_t sizes_sizet[NCCL_NET_IB_MAX_RECVS];
-  for (int i=0; i<n; i++) sizes_sizet[i] = sizes[i];
-  return nccl_uct_rd_irecv(recv_comm, n, data, sizes_sizet, tags, mhandles, request);
 }
 
 static ncclResult_t nccl_uct_rd_iflush(void *recv_comm, int n, void **data,
@@ -441,6 +428,32 @@ static ncclResult_t nccl_uct_rd_close(void *close_comm) {
   return ncclSuccess;
 }
 
+static ncclResult_t nccl_uct_rd_init_v9(ncclDebugLogger_t logFunction) {
+  return nccl_uct_rd_init(logFunction, NULL);
+}
+
+static ncclResult_t nccl_uct_rd_isend_v9(void* sendComm, void* data, size_t size, int tag, void* mhandle, void** request) {
+  return nccl_uct_rd_isend(sendComm, data, size, tag, mhandle, NULL, request);
+}
+
+static ncclResult_t nccl_uct_rd_irecv_v9(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** request) {
+  return nccl_uct_rd_irecv(recvComm, n, data, sizes, tags, mhandles, NULL, request);
+}
+
+static ncclResult_t nccl_uct_rd_isend_v8(void *send_comm, void *data, int size,
+                                      int tag, void *mhandle, void **request) {
+  return nccl_uct_rd_isend_v9(send_comm, data, (size_t)size, tag, mhandle, request);
+}
+
+static ncclResult_t nccl_uct_rd_irecv_v8(void *recv_comm, int n, void **data,
+                                      int *sizes, int *tags, void **mhandles,
+                                      void **request) {
+  size_t sizes_sizet[NCCL_NET_IB_MAX_RECVS];
+  for (int i=0; i<n; i++) sizes_sizet[i] = sizes[i];
+  return nccl_uct_rd_irecv_v9(recv_comm, n, data, sizes_sizet, tags, mhandles, request);
+}
+
+ncclNet_v10_t ucxUctRdPlugin_v10 = NCCL_UCT_PLUGIN_V10("UCX-UCT-RD", nccl_uct_rd);
 ncclNet_v9_t ucxUctRdPlugin_v9 = NCCL_UCT_PLUGIN_V9("UCX-UCT-RD", nccl_uct_rd);
 ncclNet_v8_t ucxUctRdPlugin_v8 = NCCL_UCT_PLUGIN_V8("UCX-UCT-RD", nccl_uct_rd);
 ncclNet_v7_t ucxUctRdPlugin_v7 = NCCL_UCT_PLUGIN_V7("UCX-UCT-RD", nccl_uct_rd);
