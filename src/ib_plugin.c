@@ -1234,16 +1234,17 @@ ib_recv:
       // coverity[copy_paste_error]
       NCCLCHECKGOTO(wrap_ibv_set_ece(qp->qp, &remMeta.qpInfo[q].ece, &meta.qpInfo[q].ece_supported), ret, fail);
 
-
-      // Query the reduced ece for this QP (matching enhancements between the requestor and the responder)
-      // Store this in our own qpInfo for returning to the requestor
-      if (meta.qpInfo[q].ece_supported)
-        NCCLCHECKGOTO(wrap_ibv_query_ece(qp->qp, &meta.qpInfo[q].ece, &meta.qpInfo[q].ece_supported), ret, fail);
     } else {
       meta.qpInfo[q].ece_supported = 0;
     }
     NCCLCHECKGOTO(ncclIbRtrQp(qp->qp, &rCommDev->base.gidInfo, remMeta.qpInfo[q].qpn, remDevInfo, true, remMeta.tc, remMeta.sl), ret, fail);
     NCCLCHECKGOTO(ncclIbRtsQp(qp->qp), ret, fail);
+
+    // Query the reduced ece for this QP (matching enhancements between the requestor and the responder)
+    // Store this in our own qpInfo for returning to the requestor
+    if (remMeta.qpInfo[q].ece_supported && meta.qpInfo[q].ece_supported) {
+      NCCLCHECKGOTO(wrap_ibv_query_ece(qp->qp, &meta.qpInfo[q].ece, &meta.qpInfo[q].ece_supported), ret, fail);
+    }
   }
 
   rComm->flushEnabled = ((nccl_p2p_gdr_support() == ncclSuccess || nccl_p2p_dmabuf_support(lComm->dev) == ncclSuccess)
