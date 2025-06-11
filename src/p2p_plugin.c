@@ -496,10 +496,12 @@ ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, ch
     pthread_mutex_lock(&nccl_p2p_lock);
     wrap_ibv_fork_init();
     if (ncclNIbDevs == -1) {
+      int nIpIfs = 0;
       ncclNIbDevs = 0;
       ncclNMergedIbDevs = 0;
       ncclNSharpDevs = 0;
-      if (ncclFindInterfaces(ncclIbIfName, ncclIbIfAddr, MAX_IF_NAME_SIZE, 1) != 1) {
+      NCCLCHECK(ncclFindInterfaces(ncclIbIfName, ncclIbIfAddr, MAX_IF_NAME_SIZE, 1, &nIpIfs));
+      if (nIpIfs != 1) {
         WARN("NET/IB : No IP interface found.");
         ret = ncclInternalError;
         goto fail;
