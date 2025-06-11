@@ -316,6 +316,7 @@ ncclResult_t wrap_mlx5dv_get_data_direct_sysfs_path(struct ibv_context *context,
     return ncclSystemError;
   }
 #else
+  INFO(NCCL_NET, "Symbol mlx5dv_get_data_direct_sysfs_path in rdma-core library");
   return ncclSystemError;
 #endif
 }
