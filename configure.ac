@@ -79,6 +79,7 @@ AC_ARG_WITH([verbs],
 
 AC_CHECK_HEADER(        [infiniband/verbs.h],  [],[AC_MSG_FAILURE([ibverbs header files not found])])
 AC_CHECK_LIB([ibverbs], [ibv_get_device_list], [],[AC_MSG_FAILURE([libibverbs not found]);])
+AC_CHECK_MEMBERS([struct ibv_port_attr.active_speed_ex], [], [], [#include <infiniband/verbs.h>])
 
 AC_CHECK_DECLS([IBV_ACCESS_RELAXED_ORDERING, IBV_QPF_GRH_REQUIRED, ibv_reg_dmabuf_mr, ibv_query_ece, ibv_set_ece], [], [],
                     [[#include <infiniband/verbs.h>]])

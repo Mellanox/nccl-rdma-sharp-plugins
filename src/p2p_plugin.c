@@ -6,6 +6,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <config.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <strings.h>
@@ -577,6 +578,7 @@ ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, ch
         for (int port_num = 1; port_num <= devAttr.phys_port_cnt; port_num++) {
           for (int dataDirect = 0; dataDirect < 1 + dataDirectSupported; ++dataDirect) {
             struct ibv_port_attr portAttr;
+            uint32_t portSpeed;
             if (ncclSuccess != wrap_ibv_query_port(context, port_num, &portAttr)) {
               WARN("NET/IB : Unable to query port_num %d", port_num);
               continue;
@@ -596,7 +598,12 @@ ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, ch
             ncclIbDevs[ncclNIbDevs].portAttr = portAttr;
             ncclIbDevs[ncclNIbDevs].portNum = port_num;
             ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
-            ncclIbDevs[ncclNIbDevs].speed = nccl_p2p_ib_speed(portAttr.active_speed) * nccl_p2p_ib_width(portAttr.active_width);
+            #if HAVE_STRUCT_IBV_PORT_ATTR_ACTIVE_SPEED_EX
+            portSpeed = portAttr.active_speed_ex ? portAttr.active_speed_ex : portAttr.active_speed;
+            #else
+            portSpeed = portAttr.active_speed;
+            #endif
+            ncclIbDevs[ncclNIbDevs].speed = nccl_p2p_ib_speed(portSpeed) * nccl_p2p_ib_width(portAttr.active_width);
             ncclIbDevs[ncclNIbDevs].context = context;
             ncclIbDevs[ncclNIbDevs].pdRefs = 0;
             ncclIbDevs[ncclNIbDevs].pd = NULL;
