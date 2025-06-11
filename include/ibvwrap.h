@@ -19,6 +19,10 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <infiniband/verbs.h>
+#if HAVE_INFINIBAND_MLX5DV_H
+#include <infiniband/mlx5dv.h>
+#endif
+
 
 #if !HAVE_DECL_IBV_ACCESS_RELAXED_ORDERING
 #  define IBV_ACCESS_RELAXED_ORDERING               0
@@ -96,5 +100,11 @@ static inline const char* ibvGetGidStr(union ibv_gid* gid, char* gidStr, size_t 
   NCCL_STATIC_ASSERT(sizeof(union ibv_gid) == sizeof(struct in6_addr), "the sizeof struct ibv_gid must be the size of struct in6_addr");
   return inet_ntop(AF_INET6, gid->raw, gidStr, strLen);
 }
+
+bool wrap_mlx5dv_is_supported(struct ibv_device *device);
+ncclResult_t wrap_mlx5dv_get_data_direct_sysfs_path(struct ibv_context *context, char *buf, size_t buf_len);
+/* DMA-BUF support */
+ncclResult_t wrap_mlx5dv_reg_dmabuf_mr(struct ibv_mr **ret, struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access, int mlx5_access);
+struct ibv_mr * wrap_direct_mlx5dv_reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access, int mlx5_access);
 
 #endif //End include guard

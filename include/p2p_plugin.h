@@ -20,7 +20,8 @@
 #include "socket.h"
 #include "utils.h"
 
-#define MAXNAMESIZE 64
+#define MAXSUFFIXSIZE 16
+#define MAXNAMESIZE  (64 + MAXSUFFIXSIZE)
 #define NCCL_NET_IB_MAX_RECVS 8
 // We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive
 #define MAX_REQUESTS (NCCL_NET_MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS)
@@ -97,6 +98,11 @@ typedef struct ncclIbNetCommDevBase {
   struct ncclIbGidInfo gidInfo;
 } ncclIbNetCommDevBase;
 
+enum ncclIbProvider {
+  IB_PROVIDER_NONE = 0,
+  IB_PROVIDER_MLX5 = 1,
+  IB_PROVIDER_MAX = 2,
+};
 typedef struct ncclIbDev {
   pthread_mutex_t lock;
   int      device;
@@ -119,6 +125,12 @@ typedef struct ncclIbDev {
   struct ibv_port_attr portAttr;
   struct ncclIbStats stats;
   int dmaBufSupported;
+  enum ncclIbProvider ibProvider;
+  union {
+    struct {
+      int dataDirect;
+    } mlx5;
+  } capsProvider;
 } __attribute__((aligned(64))) ncclIbDev;
 
 

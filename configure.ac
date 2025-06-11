@@ -83,6 +83,41 @@ AC_CHECK_LIB([ibverbs], [ibv_get_device_list], [],[AC_MSG_FAILURE([libibverbs no
 AC_CHECK_DECLS([IBV_ACCESS_RELAXED_ORDERING, IBV_QPF_GRH_REQUIRED, ibv_reg_dmabuf_mr, ibv_query_ece, ibv_set_ece], [], [],
                     [[#include <infiniband/verbs.h>]])
 
+#
+# mlx5 DV support
+#
+AC_ARG_WITH([mlx5-dv],
+            [AC_HELP_STRING([--with-mlx5-dv], [Compile with mlx5 Direct Verbs
+                support. Direct Verbs (DV) support provides additional
+                acceleration capabilities that are not available in a
+                regular mode.])])
+
+AS_IF([test "x$with_mlx5_dv" != xno], [
+    AC_CHECK_LIB([mlx5], [mlx5dv_query_device],
+                    [AC_SUBST(LIB_MLX5, [-lmlx5])],
+                    [with_mlx5_dv=no], [-libverbs])
+
+    AS_IF([test "x$with_mlx5_dv" != xno], [
+        AC_CHECK_HEADERS([infiniband/mlx5dv.h],
+                         [with_mlx5_dv=yes
+                         mlx5_include=mlx5dv.h], [], [ ])])
+
+        AS_IF([test "x$with_mlx5_dv" = "xyes" ], [
+        AC_CHECK_DECLS([
+                       mlx5dv_query_device,
+                       mlx5dv_create_qp,
+                       mlx5dv_is_supported,
+                       mlx5dv_get_data_direct_sysfs_path,
+                       mlx5dv_reg_dmabuf_mr],
+                       [], [], [[#include <infiniband/mlx5dv.h>]])])
+    ],
+    [
+        with_mlx5_dv=no
+    ])
+
+AS_IF([test "x$with_mlx5_dv" = "xyes" ], [LDFLAGS="$LDFLAGS -lmlx5"], [])
+
+
 # check for ucx
 AM_CONDITIONAL([HAVE_UCX_PLUGIN], [false])
 m4_include([m4/ucx.m4])
@@ -94,6 +129,9 @@ AM_CONDITIONAL([HAVE_SHARP_PLUGIN], [false])
 m4_include([m4/sharp.m4])
 CHECK_SHARP
 AC_MSG_RESULT([SHARP support: $sharp_happy])
+
+#check for mlx5dv
+AM_CONDITIONAL([HAVE_MLX5_DV], [test "x$with_mlx5_dv" = xyes])
 
 #check for required headers
 AC_CHECK_HEADERS([limits.h stdlib.h string.h unistd.h], [],
