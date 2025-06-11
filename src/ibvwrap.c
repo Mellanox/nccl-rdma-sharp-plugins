@@ -298,3 +298,48 @@ ncclResult_t wrap_ibv_event_type_str(char **ret, enum ibv_event_type event) {
   *ret = (char *) ibv_event_type_str(event);
   return ncclSuccess;
 }
+
+
+
+bool wrap_mlx5dv_is_supported(struct ibv_device *device) {
+	return mlx5dv_is_supported(device);
+}
+
+ncclResult_t wrap_mlx5dv_get_data_direct_sysfs_path(struct ibv_context *context, char *buf, size_t buf_len) {
+#if HAVE_DECL_MLX5DV_GET_DATA_DIRECT_SYSFS_PATH
+   int ret;
+  ret = mlx5dv_get_data_direct_sysfs_path(context, buf, buf_len);
+  if (!ret) {
+    return ncclSuccess;
+  } else {
+    INFO(NCCL_NET, "Call to mlx5dv_get_data_direct_sysfs_path failed with error %s errno %d", strerror(ret), ret);
+    return ncclSystemError;
+  }
+#else
+  return ncclSystemError;
+#endif
+}
+
+  /* DMA-BUF support */
+ncclResult_t wrap_mlx5dv_reg_dmabuf_mr(struct ibv_mr **ret, struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access, int mlx5_access) {
+#if HAVE_DECL_MLX5DV_REG_DMABUF_MR
+  *ret = mlx5dv_reg_dmabuf_mr(pd, offset, length, iova, fd, access, mlx5_access);
+  if (*ret == NULL) {
+    WARN("Call to mlx5dv_reg_dmabuf_mr failed with error %s", strerror(errno));
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+#else
+  return ncclSystemError;
+#endif
+}
+
+struct ibv_mr * wrap_direct_mlx5dv_reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access, int is_data_direct) {
+#if HAVE_DECL_MLX5DV_REG_DMABUF_MR
+  int mlx5_access = (is_data_direct) ? MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT : 0;
+  return mlx5dv_reg_dmabuf_mr(pd, offset, length, iova, fd, access, mlx5_access);
+#else
+  errno = EOPNOTSUPP;
+  return NULL;
+#endif
+}
