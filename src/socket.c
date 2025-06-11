@@ -461,6 +461,9 @@ static ncclResult_t socketTryAccept(struct ncclSocket* sock) {
   return ncclSuccess;
 }
 
+NCCL_PARAM(SocketMaxRecvBuff, "SOCKET_RCVBUF", -1);
+NCCL_PARAM(SocketMaxSendBuff, "SOCKET_SNDBUF", -1);
+
 static ncclResult_t socketSetFlags(struct ncclSocket* sock) {
   const int one = 1;
   /* Set socket as non-blocking if async or if we need to be able to abort */
@@ -469,7 +472,11 @@ static ncclResult_t socketSetFlags(struct ncclSocket* sock) {
     SYSCHECK(flags = fcntl(sock->fd, F_GETFL), "fcntl");
     SYSCHECK(fcntl(sock->fd, F_SETFL, flags | O_NONBLOCK), "fcntl");
   }
-  SYSCHECK(setsockopt(sock->fd, IPPROTO_TCP, TCP_NODELAY, (char*)&one, sizeof(int)), "setsockopt");
+  SYSCHECK(setsockopt(sock->fd, IPPROTO_TCP, TCP_NODELAY, (char*)&one, sizeof(int)), "setsockopt TCP NODELAY");
+  // setsockopt should not fail even if the sizes are too large, do not change the default if unset by the user (=-1)
+  int rcvBuf = ncclParamSocketMaxRecvBuff(), sndBuf = ncclParamSocketMaxSendBuff();
+  if (sndBuf > 0) SYSCHECK(setsockopt(sock->fd, SOL_SOCKET, SO_SNDBUF, (char*)&sndBuf, sizeof(int)), "setsockopt SO_SNDBUF");
+  if (rcvBuf > 0) SYSCHECK(setsockopt(sock->fd, SOL_SOCKET, SO_RCVBUF, (char*)&rcvBuf, sizeof(int)), "setsockopt SO_RCVBUF");
   return ncclSuccess;
 }
 
