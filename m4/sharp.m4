@@ -82,6 +82,7 @@ AS_IF([test "x$sharp_checked" != "xyes"],[
                                                     [SHARP v3 datatypes : bfloat16, uint8, int8])], [],
                            [[#include <sharp/api/sharp_coll.h>]])
             AC_CHECK_DECLS([sharp_coll_reg_mr_v2], [], [], [[#include <sharp/api/sharp_coll.h>]])
+            AC_CHECK_DECLS([SHARP_COLL_REG_FIELD_DMABUF_DATA_DIRECT], [], [], [[#include <sharp/api/sharp_coll.h>]])
 
         ],
         [
