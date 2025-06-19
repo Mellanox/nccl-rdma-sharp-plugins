@@ -59,6 +59,7 @@ struct ncclSharpListenComm {
 };
 
 struct ncclSharpCollComm {
+  int    dev;
   int    rank;
   int    nranks;
   void*  recvComm;
@@ -305,6 +306,7 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
 
   cComm->nranks = nranks;
   cComm->rank = rank;
+  cComm->dev = lComm->dev;
   if (cComm->rank == -1) {
     WARN("Could not determine my rank\n");
     return ncclInternalError;
@@ -419,6 +421,12 @@ ncclResult_t ncclSharpRegMrDmaBuf(void* collComm, void* data, size_t size, int t
   reg_params.dmabuf_fd = fd;
   reg_params.dmabuf_offset = offset;
   mh->type = type;
+#if HAVE_DECL_SHARP_COLL_REG_FIELD_DMABUF_DATA_DIRECT
+  struct ncclIbDev* ibDev = ncclIbDevs + cComm->dev;
+  if (fd != -1 && incclIbDevs[cComm->dev].capsProvider.mlx5.dataDirect) {
+    reg_params.field_mask |= SHARP_COLL_REG_FIELD_DMABUF_DATA_DIRECT;
+  }
+#endif
   if (SHARP_COLL_SUCCESS != sharp_coll_reg_mr_v2(cComm->sharpCollContext, data, size, &reg_params, &(mh->mr))) {
     WARN("SHARP regmr failed\n");
     return ncclSystemError;
