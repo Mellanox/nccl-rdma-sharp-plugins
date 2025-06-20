@@ -13,6 +13,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <assert.h>
+#include <string.h>
 
 #include "config.h"
 #include "core.h"
@@ -282,6 +283,26 @@ ncclResult_t ncclSharpListen(int dev, void* opaqueHandle, void** listenComm) {
   return status;
 }
 
+/* for data direct nic, the device name is ends with suffix '_dma`.
+ * remove this suffix before passing name to libsharp */
+static void sharp_get_device_name(const char *input, char *output, size_t output_size) {
+  const char *suffix = "_dma";
+  size_t input_len = strlen(input);
+  size_t suffix_len = strlen(suffix);
+
+  if (input_len >= suffix_len && strcmp(input + input_len - suffix_len, suffix) == 0) {
+    size_t new_len = input_len - suffix_len;
+    if (new_len >= output_size) {
+      new_len = output_size - 1;
+    }
+    memcpy(output, input, new_len);
+    output[new_len] = '\0';
+  } else {
+    strncpy(output, input, output_size - 1);
+    output[output_size - 1] = '\0';
+  }
+}
+
 ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* listenComm, void** collComm) {
   struct ncclSharpListenComm* lComm = (struct ncclSharpListenComm*)listenComm;
   struct ncclSharpCollComm* cComm;
@@ -357,7 +378,8 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
   char devName[MAXNAMESIZE];
   ncclNetProperties_v6_t prop;
   ncclSharpGetProperties_v6(lComm->dev, &prop);
-  snprintf(devName, MAXNAMESIZE, "%s:%d", prop.name, prop.port);
+  sharp_get_device_name(prop.name, devName, 64);
+  snprintf(devName + strlen(devName), MAXNAMESIZE - strlen(devName), ":%d", prop.port);
   init_spec.config.ib_dev_list = devName;
 
   int ret = sharp_coll_init(&init_spec, &cComm->sharpCollContext);
@@ -422,8 +444,7 @@ ncclResult_t ncclSharpRegMrDmaBuf(void* collComm, void* data, size_t size, int t
   reg_params.dmabuf_offset = offset;
   mh->type = type;
 #if HAVE_DECL_SHARP_COLL_REG_FIELD_DMABUF_DATA_DIRECT
-  struct ncclIbDev* ibDev = ncclIbDevs + cComm->dev;
-  if (fd != -1 && incclIbDevs[cComm->dev].capsProvider.mlx5.dataDirect) {
+  if (fd != -1 && ncclIbDevs[cComm->dev].capsProvider.mlx5.dataDirect) {
     reg_params.field_mask |= SHARP_COLL_REG_FIELD_DMABUF_DATA_DIRECT;
   }
 #endif
