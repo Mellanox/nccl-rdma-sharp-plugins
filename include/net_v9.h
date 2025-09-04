@@ -13,10 +13,7 @@
 
 #define NCCL_NET_MAX_DEVS_PER_NIC_V9 4
 
-typedef struct {
-  int ndevs;
-  int devs[NCCL_NET_MAX_DEVS_PER_NIC_V9];
-} ncclNetVDeviceProps_v9_t;
+typedef ncclNetVDeviceProps_v11_t ncclNetVDeviceProps_v9_t;
 
 typedef struct {
   char* name;                      // Used mostly for logging.
@@ -93,8 +90,10 @@ typedef struct {
   ncclResult_t (*irecvConsumed)(void* recvComm, int n, void* request);
 
   // Create a virtual NIC given the specified properties, which can be accessed at device index d
-  ncclResult_t (*makeVDevice)(int* d, ncclNetVDeviceProps_t* props);
+  ncclResult_t (*makeVDevice)(int* d, ncclNetVDeviceProps_v9_t* props);
 } ncclNet_v9_t;
+
+typedef ncclNetSGE_v11_t ncclNetSGE_v9_t;
 
 typedef struct {
   // Name of the collective network (mainly for logs)
@@ -125,10 +124,10 @@ typedef struct {
   // May return request == NULL if the call cannot be performed (or would block).
   ncclResult_t (*iallreduce)(void* collComm, void* sendData, void* recvData, size_t count,
       ncclDataType_t dataType, ncclRedOp_t redOp, void* sendMhandle, void* recvMhandle, void** request);
-  ncclResult_t (*iallgather)(void* collComm, void* sendData, int nRecvParts, ncclNetSGE_v10_t* recvParts,
+  ncclResult_t (*iallgather)(void* collComm, void* sendData, int nRecvParts, ncclNetSGE_v9_t* recvParts,
                              size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
                              void* sendMhandle, void** request);
-  ncclResult_t (*ireducescatter)(void* collComm, int nSendParts, ncclNetSGE_v10_t* sendParts, void* recvData,
+  ncclResult_t (*ireducescatter)(void* collComm, int nSendParts, ncclNetSGE_v9_t* sendParts, void* recvData,
                                  size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
                                  ncclDataType_t dataType, ncclRedOp_t redOp,
                                  void* recvMhandle, void** request);
@@ -143,7 +142,7 @@ typedef struct {
   ncclResult_t (*closeListen)(void* listenComm);
 
   // Create a virtual NIC given the specified properties, which can be accessed at device index d
-  ncclResult_t (*makeVDevice)(int* d, ncclNetVDeviceProps_t* props);
+  ncclResult_t (*makeVDevice)(int* d, ncclNetVDeviceProps_v9_t* props);
 } ncclCollNet_v9_t;
 
 #endif // end include guard

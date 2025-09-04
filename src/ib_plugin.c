@@ -30,6 +30,8 @@
 static char ncclIbIfName[MAX_IF_NAME_SIZE+1];
 static union ncclSocketAddress ncclIbIfAddr;
 
+static ncclNetCommConfig_t ibContext;
+
 pthread_mutex_t ncclIbLock = PTHREAD_MUTEX_INITIALIZER;
 int ncclIbRelaxedOrderingEnabled = 0;
 
@@ -54,6 +56,14 @@ NCCL_PARAM(IbPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 2);
 NCCL_PARAM(IbFifoTc, "IB_FIFO_TC", 0);
 NCCL_PARAM(IbAsyncEvents,"IB_RETURN_ASYNC_EVENTS",1);
 NCCL_PARAM(IbEceEnable,"IB_ECE_ENABLE",1);
+
+// With ncclNet_v11_t the NCCL core initializes the network plugin per-communicator
+// rather than once for all communicators. However, the internal plugin implementation
+// still assumes the plugin is initialized only once across all communicators. The ref
+// counter makes sure the plugin internally initializes only once. When per communicator
+// context support is added to the plugin the ref counter can be removed.
+static int ibRefCount = 0;
+
 
 static ncclResult_t ncclIbStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
   if (ncclParamIbAsyncEvents() && __atomic_load_n(&stat->fatalErrorCount, __ATOMIC_RELAXED)) {
@@ -337,6 +347,31 @@ ncclResult_t ncclIbGetProperties(int dev, ncclNetProperties_t* props)
   return nccl_p2p_ib_get_properties(ncclIbDevs, ncclNMergedIbDevs, dev, props);
 }
 
+ncclResult_t ncclIbGetProperties_v10(int dev, ncclNetProperties_v10_t* props_v10) {
+  ncclNetProperties_t props;
+  ncclResult_t ret = nccl_p2p_ib_get_properties(ncclIbDevs, ncclNMergedIbDevs, dev, &props);
+  if (ret != ncclSuccess) return ret;
+  props_v10->name = props.name;
+  props_v10->pciPath = props.pciPath;
+  props_v10->guid = props.guid;
+  props_v10->ptrSupport = props.ptrSupport;
+  props_v10->regIsGlobal = props.regIsGlobal;
+  props_v10->forceFlush = props.forceFlush;
+  props_v10->speed = props.speed;
+  props_v10->port = props.port;
+  props_v10->latency = props.latency;
+  props_v10->maxComms = props.maxComms;
+  props_v10->maxRecvs = props.maxRecvs;
+  props_v10->netDeviceType = props.netDeviceType;
+  props_v10->netDeviceVersion = props.netDeviceVersion;
+  props_v10->maxP2pBytes = props.maxP2pBytes;
+  props_v10->maxCollBytes = props.maxCollBytes;
+  props_v10->vProps.ndevs = props.vProps.ndevs;
+  for(int i=0; i<props.vProps.ndevs; i++) {
+  props_v10->vProps.devs[i] = props.vProps.devs[i];
+  }
+  return ncclSuccess;
+}
 
 ncclResult_t ncclIbGetProperties_v9(int dev, ncclNetProperties_v9_t* props_v9) {
   ncclNetProperties_t props;
@@ -603,7 +638,14 @@ struct ncclIbRecvComm {
   int flushEnabled;
 };
 
-ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+ncclResult_t ncclIbSetNetAttr(void *ctx, ncclNetAttr_t *netAttr) {
+  (void)ctx;
+  (void)netAttr;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+  if (ibRefCount++) return ncclSuccess;
   if (ncclParamIbDisable()) return ncclInternalError;
 
   // The SendFifo needs to be 32-byte aligned and each element needs
@@ -617,7 +659,11 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction, ncclProfilerCallback_t pr
   NCCL_STATIC_ASSERT((offsetof(struct ncclIbRecvComm, remFifo) % 32) == 0, "ncclIbSendComm fifo must be 32-byte aligned");
 
 
-  return nccl_p2p_ib_init(&ncclNIbDevs, &ncclNMergedIbDevs, ncclIbDevs, ncclIbIfName, &ncclIbIfAddr, &ncclIbAsyncThread, logFunction);
+  ncclResult_t ret = nccl_p2p_ib_init(&ncclNIbDevs, &ncclNMergedIbDevs, ncclIbDevs, ncclIbIfName, &ncclIbIfAddr, &ncclIbAsyncThread, logFunction);
+  if (ret != ncclSuccess) return ret;
+  if (config)  ibContext.trafficClass = config->trafficClass;
+  if (ctx)  *ctx = (void*)&ibContext;
+  return ncclSuccess;
 }
 
 NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
@@ -750,7 +796,7 @@ ncclResult_t ncclIbRtsQp(struct ibv_qp* qp) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbListen(int dev, void* opaqueHandle, void** listenComm) {
+ncclResult_t ncclIbListen(void *ctx, int dev, void* opaqueHandle, void** listenComm) {
   ncclResult_t ret = ncclSuccess;
   struct ncclIbListenComm* comm;
   comm = malloc(sizeof(struct ncclIbListenComm));
@@ -772,7 +818,7 @@ fail:
   goto exit;
 }
 
-ncclResult_t ncclIbConnect(int dev, ncclNetCommConfig_t* config, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** sendDevComm) {
+ncclResult_t ncclIbConnect(void *ctx, int dev,  void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** sendDevComm) {
   ncclResult_t ret = ncclSuccess;
   struct ncclIbHandle* handle = (struct ncclIbHandle*) opaqueHandle;
   struct ncclIbCommStage* stage = &handle->stage;
@@ -835,6 +881,7 @@ ib_recv_dev_list:
   if (stage->offset != sizeof(ncclNetVDeviceProps_t)) return ncclSuccess;
   stage->offset = 0;
   ncclNetVDeviceProps_t remoteVProps;
+  ncclNetCommConfig_t* config;
   memcpy(&remoteVProps, stage->buffer, sizeof(ncclNetVDeviceProps_t));
   mergedDev = ncclIbMergedDevs + dev;
   comm->base.vProps = mergedDev->vProps;
@@ -930,6 +977,7 @@ ib_recv_dev_list:
     }
   }
 
+  config = (ncclNetCommConfig_t*)ctx;
   meta.fifoAddr = (uint64_t)comm->fifo;
   meta.sl = (ncclParamIbSl() != -1) ? ncclParamIbSl() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_SL_DEFAULT;
   meta.tc = (ncclParamIbTc() != -1) ? ncclParamIbTc() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_TC_DEFAULT;
@@ -2019,12 +2067,29 @@ ncclResult_t ncclIbMakeVDevice(int* d, ncclNetVDeviceProps_t* props) {
   return res;
 }
 
+ncclResult_t ncclIbFinalize(void* ctx) {
+  ibRefCount--;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbInit_v10(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profilerCallback) {
+  return ncclIbInit(NULL, 0, NULL, logFunction, NULL);
+ }
+
+ncclResult_t ncclIbConnect_v10(int dev, ncclNetCommConfig_v10_t* config, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_v10_t** sendDevComm) {
+  return ncclIbConnect(NULL, dev, opaqueHandle, sendComm, sendDevComm);
+}
+
+ncclResult_t ncclIbListen_v10(int dev, void* opaqueHandle, void** listenComm) {
+  return ncclIbListen(NULL, dev, opaqueHandle, listenComm);
+}
+
 ncclResult_t ncclIbConnect_v9(int dev, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** sendDevComm) {
-  return ncclIbConnect(dev, NULL, opaqueHandle, sendComm, sendDevComm);
+  return ncclIbConnect_v10(dev, NULL, opaqueHandle, sendComm, sendDevComm);
 }
 
 ncclResult_t ncclIbInit_v9(ncclDebugLogger_t logFunction) {
-  return ncclIbInit(logFunction, NULL);
+  return ncclIbInit_v10(logFunction, NULL);
 }
 
 ncclResult_t ncclIbIsend_v9(void* sendComm, void* data, size_t size, int tag, void* mhandle, void** request) {
@@ -2061,14 +2126,38 @@ ncclResult_t ncclIbAccept_v6(void* listenComm, void** recvComm) {
   return ncclIbAccept(listenComm, recvComm, &handle);
 }
 
-
-const ncclNet_v10_t ibPlugin_v10 = {
-  .name = "IBext_v10",
+const ncclNet_v11_t ibPlugin_v11 = {
+  .name = "IBext_v11",
   .init = ncclIbInit,
   .devices = ncclIbDevices,
   .getProperties = ncclIbGetProperties,
   .listen = ncclIbListen,
   .connect = ncclIbConnect,
+  .accept = ncclIbAccept,
+  .regMr = ncclIbRegMr,
+  .regMrDmaBuf = ncclIbRegMrDmaBuf,
+  .deregMr = ncclIbDeregMr,
+  .isend = ncclIbIsend,
+  .irecv = ncclIbIrecv,
+  .iflush = ncclIbIflush,
+  .test = ncclIbTest,
+  .closeSend = ncclIbCloseSend,
+  .closeRecv = ncclIbCloseRecv,
+  .closeListen = ncclIbCloseListen,
+  NULL /* getDeviceMr */,
+  NULL /* irecvConsumed */,
+  ncclIbMakeVDevice,
+  ncclIbFinalize,
+  ncclIbSetNetAttr
+};
+
+const ncclNet_v10_t ibPlugin_v10 = {
+  .name = "IBext_v10",
+  .init = ncclIbInit_v10,
+  .devices = ncclIbDevices,
+  .getProperties = ncclIbGetProperties_v10,
+  .listen = ncclIbListen_v10,
+  .connect = ncclIbConnect_v10,
   .accept = ncclIbAccept,
   .regMr = ncclIbRegMr,
   .regMrDmaBuf = ncclIbRegMrDmaBuf,
@@ -2090,7 +2179,7 @@ const ncclNet_v9_t ibPlugin_v9 = {
   .init = ncclIbInit_v9,
   .devices = ncclIbDevices,
   .getProperties = ncclIbGetProperties_v9,
-  .listen = ncclIbListen,
+  .listen = ncclIbListen_v10,
   .connect = ncclIbConnect_v9,
   .accept = ncclIbAccept,
   .regMr = ncclIbRegMr,
@@ -2114,7 +2203,7 @@ const ncclNet_v8_t ibPlugin_v8 = {
   .init = ncclIbInit_v9,
   .devices = ncclIbDevices,
   .getProperties = ncclIbGetProperties_v8,
-  .listen = ncclIbListen,
+  .listen = ncclIbListen_v10,
   .connect = ncclIbConnect_v9,
   .accept = ncclIbAccept,
   .regMr = ncclIbRegMr,
@@ -2136,7 +2225,7 @@ const ncclNet_v7_t ibPlugin_v7 = {
   .init = ncclIbInit_v9,
   .devices = ncclIbDevices,
   .getProperties = ncclIbGetProperties_v7,
-  .listen = ncclIbListen,
+  .listen = ncclIbListen_v10,
   .connect = ncclIbConnect_v9,
   .accept = ncclIbAccept,
   .regMr = ncclIbRegMr_v7,
@@ -2158,30 +2247,11 @@ const ncclNet_v6_t ibPlugin_v6 = {
   .init = ncclIbInit_v9,
   .devices = ncclIbDevices,
   .getProperties = ncclIbGetProperties_v6,
-  .listen = ncclIbListen,
+  .listen = ncclIbListen_v10,
   .connect = ncclIbConnect_v6,
   .accept = ncclIbAccept_v6,
   .regMr = ncclIbRegMr_v7,
   .regMrDmaBuf = ncclIbRegMrDmaBuf,
-  .deregMr = ncclIbDeregMr,
-  .isend = ncclIbIsend_v8,
-  .irecv = ncclIbIrecv_v8,
-  .iflush = ncclIbIflush,
-  .test = ncclIbTest,
-  .closeSend = ncclIbCloseSend,
-  .closeRecv = ncclIbCloseRecv,
-  .closeListen = ncclIbCloseListen,
-};
-
-const ncclNet_v5_t ibPlugin_v5 = {
-  .name = "IBext_v5",
-  .init = ncclIbInit_v9,
-  .devices = ncclIbDevices,
-  .getProperties = ncclIbGetProperties_v6,
-  .listen = ncclIbListen,
-  .connect = ncclIbConnect_v6,
-  .accept = ncclIbAccept_v6,
-  .regMr = ncclIbRegMr_v7,
   .deregMr = ncclIbDeregMr,
   .isend = ncclIbIsend_v8,
   .irecv = ncclIbIrecv_v8,

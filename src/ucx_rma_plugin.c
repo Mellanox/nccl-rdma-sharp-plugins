@@ -37,6 +37,12 @@
 } while(0)
 
 NCCL_PARAM(UCXRMADisable, "UCX_RMA_DISABLE", 0);
+// With ncclNet_v11_t the NCCL core initializes the network plugin per-communicator
+// rather than once for all communicators. However, the internal plugin implementation
+// still assumes the plugin is initialized only once across all communicators. The ref
+// counter makes sure the plugin internally initializes only once. When per communicator
+// context support is added to the plugin the ref counter can be removed.
+static int ucxRmaRefCount = 0;
 
 extern ncclDebugLogger_t pluginLogFunction;
 static char nccl_ucx_rma_tls[32] = "";
@@ -81,6 +87,33 @@ ncclResult_t nccl_ucx_rma_devices(int* ndev) {
 ncclResult_t nccl_ucx_rma_get_properties(int dev, ncclNetProperties_t* props)
 {
   return nccl_p2p_ib_get_properties(ncclIbDevs, ncclNMergedIbDevs, dev, props);
+}
+
+
+ncclResult_t nccl_ucx_rma_get_properties_v10(int dev, ncclNetProperties_v10_t* props_v10) {
+  ncclNetProperties_t props;
+  ncclResult_t ret = nccl_p2p_ib_get_properties(ncclIbDevs, ncclNMergedIbDevs, dev, &props);
+  if (ret != ncclSuccess) return ret;
+  props_v10->name = props.name;
+  props_v10->pciPath = props.pciPath;
+  props_v10->guid = props.guid;
+  props_v10->ptrSupport = props.ptrSupport;
+  props_v10->regIsGlobal = props.regIsGlobal;
+  props_v10->forceFlush = props.forceFlush;
+  props_v10->speed = props.speed;
+  props_v10->port = props.port;
+  props_v10->latency = props.latency;
+  props_v10->maxComms = props.maxComms;
+  props_v10->maxRecvs = props.maxRecvs;
+  props_v10->netDeviceType = props.netDeviceType;
+  props_v10->netDeviceVersion = props.netDeviceVersion;
+  props_v10->maxP2pBytes = props.maxP2pBytes;
+  props_v10->maxCollBytes = props.maxCollBytes;
+  props_v10->vProps.ndevs = props.vProps.ndevs;
+  for(int i=0; i<props.vProps.ndevs; i++) {
+  props_v10->vProps.devs[i] = props.vProps.devs[i];
+  }
+  return ncclSuccess;
 }
 
 ncclResult_t nccl_ucx_rma_get_properties_v9(int dev, ncclNetProperties_v9_t* props_v9) {
@@ -290,8 +323,8 @@ static ncclResult_t nccl_ucx_rma_init_ucp(int dev, ucp_context_h *ctx)
   ucp_config_t *config;
   char         ucx_dev_name[PATH_MAX];
 
-  snprintf(ucx_dev_name, PATH_MAX, "%s:%d", ncclIbDevs[dev].devName,
-           ncclIbDevs[dev].portNum);
+  plugin_get_device_name(ncclIbDevs[dev].devName, ucx_dev_name, 64);
+  snprintf(ucx_dev_name, PATH_MAX - strlen(ucx_dev_name), ":%d", ncclIbDevs[dev].portNum);
   UCXCHECK(ucp_config_read("NCCL", NULL, &config));
 
   UCXCHECK(ucp_config_modify(config, "NET_DEVICES", ucx_dev_name));
@@ -431,8 +464,15 @@ static ncclResult_t nccl_ucx_add_ep(ucp_worker_h worker, struct ncclSocket *sock
   return status;
 }
 
-ncclResult_t nccl_ucx_rma_init(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction)
+ncclResult_t nccl_ucx_rma_setNetAttr(void *ctx, ncclNetAttr_t *netAttr) {
+  (void)ctx;
+  (void)netAttr;
+  return ncclSuccess;
+}
+
+ncclResult_t nccl_ucx_rma_init(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction)
 {
+  if (ucxRmaRefCount++) return ncclSuccess;
   char *config_env;
   if (ncclParamUCXRMADisable()) return ncclInternalError;
   NCCLCHECK(nccl_p2p_ib_init(&ncclNIbDevs, &ncclNMergedIbDevs, ncclIbDevs, if_name, &nccl_ucx_if_addr,
@@ -461,7 +501,7 @@ ncclResult_t nccl_ucx_rma_init(ncclDebugLogger_t logFunction, ncclProfilerCallba
   return ncclSuccess;
 }
 
-ncclResult_t nccl_ucx_rma_listen(int dev, void *handle, void **listen_comm)
+ncclResult_t nccl_ucx_rma_listen(void *ctx, int dev, void *handle, void **listen_comm)
 {
   ucx_rma_listen_handle_t *my_handle = (ucx_rma_listen_handle_t*)handle;
   nccl_ucx_rma_listen_comm_t   *comm;
@@ -503,7 +543,7 @@ static ucs_status_t nccl_ucx_rma_am_rkey_cb(void *arg, void *data, size_t length
 }
 
 
-ncclResult_t nccl_ucx_rma_connect(int dev, ncclNetCommConfig_t* config, void *handle, void **send_comm, ncclNetDeviceHandle_t** sendDevComm)
+ncclResult_t nccl_ucx_rma_connect(void *ctx,int dev, void *handle, void **send_comm, ncclNetDeviceHandle_t** sendDevComm)
 {
   ucx_rma_listen_handle_t  *recv_handle = (ucx_rma_listen_handle_t*)handle;
   struct ncclUCXCommStage* stage        = &recv_handle->stage;
@@ -1211,12 +1251,29 @@ ncclResult_t nccl_ucx_rma_close_listen(void *listen_comm)
   return ncclSuccess;
 }
 
+ncclResult_t nccl_ucx_rma_finalize(void* ctx) {
+  ucxRmaRefCount--;
+  return ncclSuccess;
+}
+
+ncclResult_t nccl_ucx_rma_init_v10(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profilerCallback) {
+  return nccl_ucx_rma_init(NULL, 0, NULL, logFunction, NULL);
+}
+
+ncclResult_t nccl_ucx_rma_connect_v10(int dev, ncclNetCommConfig_v10_t* config, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_v10_t** sendDevComm) {
+  return nccl_ucx_rma_connect(NULL, dev, opaqueHandle, sendComm, sendDevComm);
+}
+  
+ncclResult_t nccl_ucx_rma_listen_v10(int dev, void* opaqueHandle, void** listenComm) {
+  return nccl_ucx_rma_listen(NULL, dev, opaqueHandle, listenComm);
+}
+
 ncclResult_t nccl_ucx_rma_connect_v9(int dev, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** sendDevComm) {
-  return nccl_ucx_rma_connect(dev, NULL, opaqueHandle, sendComm, sendDevComm);
+  return nccl_ucx_rma_connect_v10(dev, NULL, opaqueHandle, sendComm, sendDevComm);
 }
 
 ncclResult_t nccl_ucx_rma_init_v9(ncclDebugLogger_t logFunction) {
-  return nccl_ucx_rma_init(logFunction, NULL);
+  return nccl_ucx_rma_init_v10(logFunction, NULL);
 }
 
 ncclResult_t nccl_ucx_rma_isend_v9(void* sendComm, void* data, size_t size, int tag, void* mhandle, void** request) {
@@ -1255,13 +1312,39 @@ ncclResult_t nccl_ucx_rma_accept_v6(void *listen_comm, void **recv_comm)
   return nccl_ucx_rma_accept(listen_comm, recv_comm, &dev_handle);
 }
 
-ncclNet_v10_t ucxRmaPlugin_v10 = {
-  .name = "UCX-RMA",
+
+ncclNet_v11_t ucxRmaPlugin_v11 = {
+  .name = "UCX",
   .init = nccl_ucx_rma_init,
   .devices = nccl_ucx_rma_devices,
   .getProperties = nccl_ucx_rma_get_properties,
   .listen = nccl_ucx_rma_listen,
   .connect = nccl_ucx_rma_connect,
+  .accept = nccl_ucx_rma_accept,
+  .regMr = nccl_ucx_rma_regmr,
+  .regMrDmaBuf = nccl_ucx_rma_regmr_dmabuf,
+  .deregMr = nccl_ucx_rma_deregmr,
+  .isend = nccl_ucx_rma_isend,
+  .irecv = nccl_ucx_rma_irecv,
+  .iflush = nccl_ucx_rma_iflush,
+  .test = nccl_ucx_rma_test,
+  .closeSend = nccl_ucx_rma_close_send,
+  .closeRecv = nccl_ucx_rma_close_recv,
+  .closeListen = nccl_ucx_rma_close_listen,
+  NULL /* getDeviceMr */,
+  NULL /* irecvConsumed */,
+  NULL,
+  nccl_ucx_rma_finalize,
+  nccl_ucx_rma_setNetAttr
+};
+
+ncclNet_v10_t ucxRmaPlugin_v10 = {
+  .name = "UCX-RMA",
+  .init = nccl_ucx_rma_init_v10,
+  .devices = nccl_ucx_rma_devices,
+  .getProperties = nccl_ucx_rma_get_properties_v10,
+  .listen = nccl_ucx_rma_listen_v10,
+  .connect = nccl_ucx_rma_connect_v10,
   .accept = nccl_ucx_rma_accept,
   .regMr = nccl_ucx_rma_regmr,
   .regMrDmaBuf = nccl_ucx_rma_regmr_dmabuf,
@@ -1283,7 +1366,7 @@ ncclNet_v9_t ucxRmaPlugin_v9 = {
   .init = nccl_ucx_rma_init_v9,
   .devices = nccl_ucx_rma_devices,
   .getProperties = nccl_ucx_rma_get_properties_v9,
-  .listen = nccl_ucx_rma_listen,
+  .listen = nccl_ucx_rma_listen_v10,
   .connect = nccl_ucx_rma_connect_v9,
   .accept = nccl_ucx_rma_accept,
   .regMr = nccl_ucx_rma_regmr,
@@ -1306,7 +1389,7 @@ ncclNet_v8_t ucxRmaPlugin_v8 = {
   .init = nccl_ucx_rma_init_v9,
   .devices = nccl_ucx_rma_devices,
   .getProperties = nccl_ucx_rma_get_properties_v8,
-  .listen = nccl_ucx_rma_listen,
+  .listen = nccl_ucx_rma_listen_v10,
   .connect = nccl_ucx_rma_connect_v9,
   .accept = nccl_ucx_rma_accept,
   .regMr = nccl_ucx_rma_regmr,
@@ -1328,7 +1411,7 @@ ncclNet_v7_t ucxRmaPlugin_v7 = {
   .init = nccl_ucx_rma_init_v9,
   .devices = nccl_ucx_rma_devices,
   .getProperties = nccl_ucx_rma_get_properties_v7,
-  .listen = nccl_ucx_rma_listen,
+  .listen = nccl_ucx_rma_listen_v10,
   .connect = nccl_ucx_rma_connect_v9,
   .accept = nccl_ucx_rma_accept,
   .regMr = nccl_ucx_rma_regmr_v7,
@@ -1350,30 +1433,11 @@ ncclNet_v6_t ucxRmaPlugin_v6 = {
   .init = nccl_ucx_rma_init_v9,
   .devices = nccl_ucx_rma_devices,
   .getProperties = nccl_ucx_rma_get_properties_v6,
-  .listen = nccl_ucx_rma_listen,
+  .listen = nccl_ucx_rma_listen_v10,
   .connect = nccl_ucx_rma_connect_v6,
   .accept = nccl_ucx_rma_accept_v6,
   .regMr = nccl_ucx_rma_regmr_v7,
   .regMrDmaBuf = nccl_ucx_rma_regmr_dmabuf,
-  .deregMr = nccl_ucx_rma_deregmr,
-  .isend = nccl_ucx_rma_isend_v8,
-  .irecv = nccl_ucx_rma_irecv_v8,
-  .iflush = nccl_ucx_rma_iflush,
-  .test = nccl_ucx_rma_test,
-  .closeSend = nccl_ucx_rma_close_send,
-  .closeRecv = nccl_ucx_rma_close_recv,
-  .closeListen = nccl_ucx_rma_close_listen
-};
-
-ncclNet_v5_t ucxRmaPlugin_v5 = {
-  .name = "UCX-RMA",
-  .init = nccl_ucx_rma_init_v9,
-  .devices = nccl_ucx_rma_devices,
-  .getProperties = nccl_ucx_rma_get_properties_v6,
-  .listen = nccl_ucx_rma_listen,
-  .connect = nccl_ucx_rma_connect_v6,
-  .accept = nccl_ucx_rma_accept_v6,
-  .regMr = nccl_ucx_rma_regmr_v7,
   .deregMr = nccl_ucx_rma_deregmr,
   .isend = nccl_ucx_rma_isend_v8,
   .irecv = nccl_ucx_rma_irecv_v8,

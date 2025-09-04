@@ -8,6 +8,13 @@
 
 #include "ucx_uct_lib.h"
 
+// With ncclNet_v11_t the NCCL core initializes the network plugin per-communicator
+// rather than once for all communicators. However, the internal plugin implementation
+// still assumes the plugin is initialized only once across all communicators. The ref
+// counter makes sure the plugin internally initializes only once. When per communicator
+// context support is added to the plugin the ref counter can be removed.
+static int ucxUctWrRefCount = 0;
+
 typedef enum {
   NCCL_UCT_REQ_IRECV  = -1,
   NCCL_UCT_REQ_IFLUSH = -2
@@ -233,7 +240,8 @@ static ncclResult_t nccl_uct_wr_comm_init(nccl_uct_comm_t *base_comm,
   return nccl_uct_comm_init(&comm->base, context, worker, dev, remote_comm);
 }
 
-static ncclResult_t nccl_uct_wr_init(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+static ncclResult_t nccl_uct_wr_init(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+  if (ucxUctWrRefCount++) return ncclSuccess;
   context.ops.comm_alloc = nccl_uct_wr_comm_alloc;
   context.ops.comm_init  = nccl_uct_wr_comm_init;
   context.ops.iface_set  = nccl_uct_wr_iface_set;
@@ -470,9 +478,16 @@ static ncclResult_t nccl_uct_wr_close(void *close_comm) {
   return ncclSuccess;
 }
 
+ncclResult_t nccl_uct_wr_finalize(void *ctx) {
+  ucxUctWrRefCount--;
+  return ncclSuccess;
+}
+ncclResult_t nccl_uct_wr_init_v10(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profilerCallback) {
+  return nccl_uct_wr_init(NULL, 0, NULL, logFunction, NULL);
+}
 
 static ncclResult_t nccl_uct_wr_init_v9(ncclDebugLogger_t logFunction) {
-  return nccl_uct_wr_init(logFunction, NULL);
+  return nccl_uct_wr_init_v10(logFunction, NULL);
 }
 
 static ncclResult_t nccl_uct_wr_isend_v9(void* sendComm, void* data, size_t size, int tag, void* mhandle, void** request) {
@@ -496,9 +511,9 @@ static ncclResult_t nccl_uct_wr_irecv_v8(void *recv_comm, int n, void **data,
   return nccl_uct_wr_irecv_v9(recv_comm, n, data, sizes_sizet, tags, mhandles, request);
 }
 
+ncclNet_v11_t ucxUctPlugin_v11 = NCCL_UCT_PLUGIN_V11("UCX-UCT", nccl_uct_wr);
 ncclNet_v10_t ucxUctPlugin_v10 = NCCL_UCT_PLUGIN_V10("UCX-UCT", nccl_uct_wr);
 ncclNet_v9_t ucxUctPlugin_v9 = NCCL_UCT_PLUGIN_V9("UCX-UCT", nccl_uct_wr);
 ncclNet_v8_t ucxUctPlugin_v8 = NCCL_UCT_PLUGIN_V8("UCX-UCT", nccl_uct_wr);
 ncclNet_v7_t ucxUctPlugin_v7 = NCCL_UCT_PLUGIN_V7("UCX-UCT", nccl_uct_wr);
 ncclNet_v6_t ucxUctPlugin_v6 = NCCL_UCT_PLUGIN_V6("UCX-UCT", nccl_uct_wr);
-ncclNet_v5_t ucxUctPlugin_v5 = NCCL_UCT_PLUGIN_V5("UCX-UCT", nccl_uct_wr);
