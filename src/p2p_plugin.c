@@ -18,41 +18,42 @@
 #include "p2p_plugin.h"
 
 #ifdef HAVE_UCX_PLUGIN
+extern ncclNet_v11_t ucxPlugin_v11;
 extern ncclNet_v10_t ucxPlugin_v10;
 extern ncclNet_v9_t ucxPlugin_v9;
 extern ncclNet_v8_t ucxPlugin_v8;
 extern ncclNet_v7_t ucxPlugin_v7;
 extern ncclNet_v6_t ucxPlugin_v6;
-extern ncclNet_v5_t ucxPlugin_v5;
 
+extern ncclNet_v11_t ucxRmaPlugin_v11;
 extern ncclNet_v10_t ucxRmaPlugin_v10;
 extern ncclNet_v9_t ucxRmaPlugin_v9;
 extern ncclNet_v8_t ucxRmaPlugin_v8;
 extern ncclNet_v7_t ucxRmaPlugin_v7;
 extern ncclNet_v6_t ucxRmaPlugin_v6;
-extern ncclNet_v5_t ucxRmaPlugin_v5;
 
+extern ncclNet_v11_t ucxUctPlugin_v11;
 extern ncclNet_v10_t ucxUctPlugin_v10;
 extern ncclNet_v9_t ucxUctPlugin_v9;
 extern ncclNet_v8_t ucxUctPlugin_v8;
 extern ncclNet_v7_t ucxUctPlugin_v7;
 extern ncclNet_v6_t ucxUctPlugin_v6;
-extern ncclNet_v5_t ucxUctPlugin_v5;
 
+extern ncclNet_v11_t ucxUctRdPlugin_v11;
 extern ncclNet_v10_t ucxUctRdPlugin_v10;
 extern ncclNet_v9_t ucxUctRdPlugin_v9;
 extern ncclNet_v8_t ucxUctRdPlugin_v8;
 extern ncclNet_v7_t ucxUctRdPlugin_v7;
 extern ncclNet_v6_t ucxUctRdPlugin_v6;
-extern ncclNet_v5_t ucxUctRdPlugin_v5;
+
 #endif
 
+extern ncclNet_v11_t ibPlugin_v11;
 extern ncclNet_v10_t ibPlugin_v10;
 extern ncclNet_v9_t ibPlugin_v9;
 extern ncclNet_v8_t ibPlugin_v8;
 extern ncclNet_v7_t ibPlugin_v7;
 extern ncclNet_v6_t ibPlugin_v6;
-extern ncclNet_v5_t ibPlugin_v5;
 pthread_mutex_t nccl_p2p_lock = PTHREAD_MUTEX_INITIALIZER;
 
 ncclDebugLogger_t pluginLogFunction;
@@ -74,12 +75,18 @@ NCCL_PARAM(SharpMaxComms, "SHARP_MAX_COMMS", 1);
 NCCL_PARAM(IbAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
 NCCL_PARAM(IbDataDirect,"IB_DATA_DIRECT", 1);
 
+ncclResult_t pluginInit_v11(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction);
 ncclResult_t pluginInit_v10(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction);
 ncclResult_t pluginInit_v9(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v8(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v7(ncclDebugLogger_t logFunction);
 ncclResult_t pluginInit_v6(ncclDebugLogger_t logFunction);
-ncclResult_t pluginInit_v5(ncclDebugLogger_t logFunction);
+
+
+ncclNet_v11_t ncclNetPlugin_v11 = {
+  "NCCL RDMA Plugin v11",
+  pluginInit_v11,
+};
 
 ncclNet_v10_t ncclNetPlugin_v10 = {
   "NCCL RDMA Plugin v10",
@@ -104,12 +111,6 @@ ncclNet_v7_t ncclNetPlugin_v7 = {
 ncclNet_v6_t ncclNetPlugin_v6 = {
   "NCCL RDMA Plugin v6",
   pluginInit_v6,
-};
-
-
-ncclNet_v5_t ncclNetPlugin_v5 = {
-  "NCCL RDMA Plugin v5",
-  pluginInit_v5,
 };
 
 
@@ -143,48 +144,57 @@ static void pluginSetup()
   switch (p2p_plugin) {
 #ifdef HAVE_UCX_PLUGIN
     case NCCL_P2P_UCX:
+      ncclNetPlugin_v11 = ucxPlugin_v11;
       ncclNetPlugin_v10 = ucxPlugin_v10;
       ncclNetPlugin_v9 = ucxPlugin_v9;
       ncclNetPlugin_v8 = ucxPlugin_v8;
       ncclNetPlugin_v7 = ucxPlugin_v7;
       ncclNetPlugin_v6 = ucxPlugin_v6;
-      ncclNetPlugin_v5 = ucxPlugin_v5;
+   
       break;
     case NCCL_P2P_UCX_RMA:
+      ncclNetPlugin_v11 = ucxRmaPlugin_v11;
       ncclNetPlugin_v10 = ucxRmaPlugin_v10;
       ncclNetPlugin_v9 = ucxRmaPlugin_v9;
       ncclNetPlugin_v8 = ucxRmaPlugin_v8;
       ncclNetPlugin_v7 = ucxRmaPlugin_v7;
       ncclNetPlugin_v6 = ucxRmaPlugin_v6;
-      ncclNetPlugin_v5 = ucxRmaPlugin_v5;
+
       break;
     case NCCL_P2P_UCX_UCT:
+      ncclNetPlugin_v11 = ucxUctPlugin_v11;
       ncclNetPlugin_v10 = ucxUctPlugin_v10;
       ncclNetPlugin_v9 = ucxUctPlugin_v9;
       ncclNetPlugin_v8 = ucxUctPlugin_v8;
       ncclNetPlugin_v7 = ucxUctPlugin_v7;
       ncclNetPlugin_v6 = ucxUctPlugin_v6;
-      ncclNetPlugin_v5 = ucxUctPlugin_v5;
       break;
     case NCCL_P2P_UCX_UCT_RD:
+      ncclNetPlugin_v11 = ucxUctRdPlugin_v11;
       ncclNetPlugin_v10 = ucxUctRdPlugin_v10;
       ncclNetPlugin_v9 = ucxUctRdPlugin_v9;
       ncclNetPlugin_v8 = ucxUctRdPlugin_v8;
       ncclNetPlugin_v7 = ucxUctRdPlugin_v7;
       ncclNetPlugin_v6 = ucxUctRdPlugin_v6;
-      ncclNetPlugin_v5 = ucxUctRdPlugin_v5;
       break;
 #endif
     default:
+      ncclNetPlugin_v11 = ibPlugin_v11;
       ncclNetPlugin_v10 = ibPlugin_v10;
       ncclNetPlugin_v9 = ibPlugin_v9;
       ncclNetPlugin_v8 = ibPlugin_v8;
       ncclNetPlugin_v7 = ibPlugin_v7;
       ncclNetPlugin_v6 = ibPlugin_v6;
-      ncclNetPlugin_v5 = ibPlugin_v5;
       break;
   }
 
+}
+
+ncclResult_t pluginInit_v11(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+  pluginLogFunction = logFunction;
+  pluginSetup();
+  INFO(NCCL_INIT|NCCL_NET, "P2P plugin v11 %s", ncclNetPlugin_v11.name);
+  return ncclNetPlugin_v11.init(ctx, commId, config, logFunction, profFunction);
 }
 
 ncclResult_t pluginInit_v10(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
@@ -220,13 +230,6 @@ ncclResult_t pluginInit_v6(ncclDebugLogger_t logFunction) {
   pluginSetup();
   INFO(NCCL_INIT|NCCL_NET, "P2P plugin %s", ncclNetPlugin_v6.name);
   return ncclNetPlugin_v6.init(logFunction);
-}
-
-ncclResult_t pluginInit_v5(ncclDebugLogger_t logFunction) {
-  pluginLogFunction = logFunction;
-  pluginSetup();
-  INFO(NCCL_INIT|NCCL_NET, "P2P plugin %s", ncclNetPlugin_v5.name);
-  return ncclNetPlugin_v5.init(logFunction);
 }
 
 // Detect whether GDR can work on a given NIC with the current CUDA device

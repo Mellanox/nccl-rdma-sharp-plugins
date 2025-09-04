@@ -437,7 +437,7 @@ ncclResult_t nccl_uct_devices(int *ndev) {
   return ncclSuccess;
 }
 
-ncclResult_t nccl_uct_listen(int dev, void *listen_handle, void **listen_comm) {
+ncclResult_t nccl_uct_listen(void *ctx, int dev, void *listen_handle, void **listen_comm) {
   nccl_uct_listen_handle_t *handle = listen_handle;
   nccl_uct_listen_comm_t *l_comm   = calloc(1, sizeof(*l_comm));
   nccl_uct_comm_t *accept_comm;
@@ -532,7 +532,7 @@ fail:
   return ncclSystemError;
 }
 
-ncclResult_t nccl_uct_connect(int dev, ncclNetCommConfig_t* config, void *listen_handle, void **send_comm,
+ncclResult_t nccl_uct_connect(void *ctx, int dev, void *listen_handle, void **send_comm,
                               ncclNetDeviceHandle_t **sendDevComm) {
   int ready                        = 0;
   nccl_uct_listen_handle_t *handle = listen_handle;
@@ -813,6 +813,32 @@ ncclResult_t nccl_uct_get_properties(int dev, ncclNetProperties_t *props) {
   return nccl_p2p_ib_get_properties(ncclIbDevs, context.merge_dev_count, dev, props);
 }
 
+ncclResult_t nccl_uct_get_properties_v10(int dev, ncclNetProperties_v10_t* props_v10) {
+  ncclNetProperties_t props;
+  ncclResult_t ret = nccl_uct_get_properties(dev, &props);
+  if (ret != ncclSuccess) return ret;
+  props_v10->name = props.name;
+  props_v10->pciPath = props.pciPath;
+  props_v10->guid = props.guid;
+  props_v10->ptrSupport = props.ptrSupport;
+  props_v10->regIsGlobal = props.regIsGlobal;
+  props_v10->forceFlush = props.forceFlush;
+  props_v10->speed = props.speed;
+  props_v10->port = props.port;
+  props_v10->latency = props.latency;
+  props_v10->maxComms = props.maxComms;
+  props_v10->maxRecvs = props.maxRecvs;
+  props_v10->netDeviceType = props.netDeviceType;
+  props_v10->netDeviceVersion = props.netDeviceVersion;
+  props_v10->maxP2pBytes = props.maxP2pBytes;
+  props_v10->maxCollBytes = props.maxCollBytes;
+  props_v10->vProps.ndevs = props.vProps.ndevs;
+  for(int i=0; i<props.vProps.ndevs; i++) {
+  props_v10->vProps.devs[i] = props.vProps.devs[i];
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t nccl_uct_get_properties_v9(int dev, ncclNetProperties_v9_t* props_v9) {
   ncclNetProperties_t props;
   ncclResult_t ret = nccl_uct_get_properties(dev, &props);
@@ -905,8 +931,17 @@ ncclResult_t nccl_uct_get_properties_v6(int dev,
   return ncclSuccess;
 }
 
+
+ncclResult_t nccl_uct_listen_v10(int dev, void* opaqueHandle, void** listenComm) {
+  return nccl_uct_listen(NULL, dev, opaqueHandle, listenComm);
+}
+
+ncclResult_t nccl_uct_connect_v10(int dev, ncclNetCommConfig_v10_t* config, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_v10_t** sendDevComm) {
+  return nccl_uct_connect(NULL, dev, opaqueHandle, sendComm, sendDevComm);
+}
+
 ncclResult_t nccl_uct_connect_v9(int dev, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** sendDevComm) {
-  return nccl_uct_connect(dev, NULL, opaqueHandle, sendComm, sendDevComm);
+  return nccl_uct_connect_v10(dev, NULL, opaqueHandle, sendComm, sendDevComm);
 }
 
 ncclResult_t nccl_uct_reg_mr_v7(void *comm, void *data, int size, int type,
@@ -923,3 +958,7 @@ ncclResult_t nccl_uct_accept_v6(void *listen_comm, void **recv_comm) {
   ncclNetDeviceHandle_v7_t *dev_handle = NULL;
   return nccl_uct_accept(listen_comm, recv_comm, &dev_handle);
 }
+
+ncclResult_t nccl_uct_setNetAttr(void *ctx, ncclNetAttr_v11_t *netAttr) {
+  return ncclSuccess;
+} 
