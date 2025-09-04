@@ -8,20 +8,13 @@
 
 #include "net_device.h"
 
-#define NCCL_NET_MAX_DEVS_PER_NIC_V10 4
-#define NCCL_NET_MAX_DEVS_PER_NIC NCCL_NET_MAX_DEVS_PER_NIC_V10
-typedef struct {
-  int ndevs;
-  int devs[NCCL_NET_MAX_DEVS_PER_NIC_V10];
-} ncclNetVDeviceProps_v10_t;
-typedef ncclNetVDeviceProps_v10_t ncclNetVDeviceProps_t;
+typedef ncclNetVDeviceProps_v11_t ncclNetVDeviceProps_v10_t;
 
 #define NCCL_NET_TRAFFIC_CLASS_UNDEF -1
 typedef struct {
   // Plugin-specific TC value
   int trafficClass;
 } ncclNetCommConfig_v10_t;
-typedef ncclNetCommConfig_v10_t ncclNetCommConfig_t;
 
 typedef struct {
   char* name;                      // Used mostly for logging.
@@ -43,7 +36,6 @@ typedef struct {
   size_t maxCollBytes;             // Max transfer size for collective operations
 } ncclNetProperties_v10_t;
 
-typedef ncclNetProperties_v10_t ncclNetProperties_t;
 
 typedef struct {
   // Name of the network (mainly for logs)
@@ -104,11 +96,7 @@ typedef struct {
   ncclResult_t (*makeVDevice)(int* d, ncclNetVDeviceProps_v10_t* props);
 } ncclNet_v10_t;
 
-typedef struct {
-  void* mhandle;
-  void* address;
-  size_t size;
-} ncclNetSGE_v10_t;
+typedef ncclNetSGE_v11_t ncclNetSGE_v10_t;
 
 typedef struct {
   // Name of the collective network (mainly for logs)
@@ -159,6 +147,5 @@ typedef struct {
   ncclResult_t (*makeVDevice)(int* d, ncclNetVDeviceProps_v10_t* props);
 } ncclCollNet_v10_t;
 
-typedef ncclCollNet_v10_t ncclCollNet_t;
 
 #endif // end include guard

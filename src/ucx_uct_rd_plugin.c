@@ -12,6 +12,13 @@
 #define NCCL_UCT_PENDING_SIZE 128
 #define NCCL_UCT_PENDING_MASK (NCCL_UCT_PENDING_SIZE - 1)
 
+// With ncclNet_v11_t the NCCL core initializes the network plugin per-communicator
+// rather than once for all communicators. However, the internal plugin implementation
+// still assumes the plugin is initialized only once across all communicators. The ref
+// counter makes sure the plugin internally initializes only once. When per communicator
+// context support is added to the plugin the ref counter can be removed.
+static int ucxUctRdRefCount = 0;
+
 /* Memory chunk to send or receive */
 typedef struct {
   int                    tag;
@@ -222,7 +229,8 @@ static ncclResult_t nccl_uct_rd_comm_init(nccl_uct_comm_t *base_comm,
   return nccl_uct_comm_init(&comm->base, context, worker, dev, remote_comm);
 }
 
-static ncclResult_t nccl_uct_rd_init(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+static ncclResult_t nccl_uct_rd_init(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+  if (ucxUctRdRefCount++) return ncclSuccess;
   NCCL_STATIC_ASSERT(NCCL_UCT_RING_SIZE >= 2 * MAX_REQUESTS,
                      "Cannot handle expected/unexpected requests");
   NCCL_STATIC_ASSERT(NCCL_UCT_PENDING_SIZE > MAX_REQUESTS,
@@ -428,8 +436,17 @@ static ncclResult_t nccl_uct_rd_close(void *close_comm) {
   return ncclSuccess;
 }
 
+ncclResult_t nccl_uct_rd_finalize(void *ctx) {
+  ucxUctRdRefCount--;
+  return ncclSuccess;
+}
+
+ncclResult_t nccl_uct_rd_init_v10(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profilerCallback) {
+  return nccl_uct_rd_init(NULL, 0, NULL, logFunction, NULL);
+}
+
 static ncclResult_t nccl_uct_rd_init_v9(ncclDebugLogger_t logFunction) {
-  return nccl_uct_rd_init(logFunction, NULL);
+  return nccl_uct_rd_init_v10(logFunction, NULL);
 }
 
 static ncclResult_t nccl_uct_rd_isend_v9(void* sendComm, void* data, size_t size, int tag, void* mhandle, void** request) {
@@ -453,9 +470,9 @@ static ncclResult_t nccl_uct_rd_irecv_v8(void *recv_comm, int n, void **data,
   return nccl_uct_rd_irecv_v9(recv_comm, n, data, sizes_sizet, tags, mhandles, request);
 }
 
+ncclNet_v11_t ucxUctRdPlugin_v11 = NCCL_UCT_PLUGIN_V11("UCX-UCT-RD", nccl_uct_rd);
 ncclNet_v10_t ucxUctRdPlugin_v10 = NCCL_UCT_PLUGIN_V10("UCX-UCT-RD", nccl_uct_rd);
 ncclNet_v9_t ucxUctRdPlugin_v9 = NCCL_UCT_PLUGIN_V9("UCX-UCT-RD", nccl_uct_rd);
 ncclNet_v8_t ucxUctRdPlugin_v8 = NCCL_UCT_PLUGIN_V8("UCX-UCT-RD", nccl_uct_rd);
 ncclNet_v7_t ucxUctRdPlugin_v7 = NCCL_UCT_PLUGIN_V7("UCX-UCT-RD", nccl_uct_rd);
 ncclNet_v6_t ucxUctRdPlugin_v6 = NCCL_UCT_PLUGIN_V6("UCX-UCT-RD", nccl_uct_rd);
-ncclNet_v5_t ucxUctRdPlugin_v5 = NCCL_UCT_PLUGIN_V5("UCX-UCT-RD", nccl_uct_rd);

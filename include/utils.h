@@ -11,6 +11,7 @@
 
 #include "nccl.h"
 #include <stdint.h>
+#include <string.h>
 
 #define NCCL_STATIC_ASSERT(_cond, _msg) \
     switch(0) {case 0:case (_cond):;}
@@ -29,5 +30,6 @@ struct netIf {
 int parseStringList(const char* string, struct netIf* ifList, int maxList);
 int matchIfList(const char* string, int port, struct netIf* ifList, int listSize, int matchExact);
 const char *get_plugin_lib_path();
+void plugin_get_device_name(const char *input, char *output, size_t output_size);
 
 #endif

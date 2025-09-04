@@ -23,15 +23,24 @@
 #include "sharp/api/sharp_coll.h"
 #include "utils.h"
 
+extern ncclNet_v11_t ncclNetPlugin_v11;
 extern ncclNet_v10_t ncclNetPlugin_v10;
 extern ncclNet_v9_t ncclNetPlugin_v9;
 extern ncclNet_v8_t ncclNetPlugin_v8;
 extern ncclNet_v7_t ncclNetPlugin_v7;
 extern ncclNet_v6_t ncclNetPlugin_v6;
-extern ncclNet_v5_t ncclNetPlugin_v5;
 
+extern ncclCollNet_v11_t ncclCollNetPlugin_v11;
 extern ncclCollNet_v10_t ncclCollNetPlugin_v10;
 extern ncclCollNet_v9_t ncclCollNetPlugin_v9;
+
+
+// With ncclNet_v11_t the NCCL core initializes the network plugin per-communicator
+// rather than once for all communicators. However, the internal plugin implementation
+// still assumes the plugin is initialized only once across all communicators. The ref
+// counter makes sure the plugin internally initializes only once. When per communicator
+// context support is added to the plugin the ref counter can be removed.
+static int sharpRefCount = 0;
 
 int ncclNSharpDevs = -1;
 struct sharp_coll_caps sharp_caps;
@@ -205,7 +214,8 @@ int ncclSharpOobBcast(void *ctx, void *buf, int size, int root) {
   return 0;
 }
 
-ncclResult_t ncclSharpInit(ncclDebugLogger_t logFunction) {
+ncclResult_t ncclSharpInit(void **ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
+  if (sharpRefCount++) return ncclSuccess;
   struct timeval tval;
   gettimeofday(&tval, NULL);
   srand((int) tval.tv_usec);
@@ -227,7 +237,7 @@ ncclResult_t ncclSharpInit(ncclDebugLogger_t logFunction) {
     ncclCollNetPlugin_v9.ireducescatter = NULL;
   }
 
-  return ncclNetPlugin_v10.init(logFunction, NULL);
+  return ncclNetPlugin_v11.init(ctx, commId, NULL, logFunction, NULL);
 }
 
 ncclResult_t ncclSharpDevices(int* ndev) {
@@ -235,6 +245,11 @@ ncclResult_t ncclSharpDevices(int* ndev) {
   return ncclSuccess;
 }
 
+ncclResult_t ncclSharpGetProperties_v11(int dev, ncclNetProperties_v11_t* props) {
+  NCCLCHECK(ncclNetPlugin_v11.getProperties(dev, props));
+  props->maxCollBytes = NCCL_MAX_NET_SIZE_BYTES;
+  return ncclSuccess;
+}
 
 ncclResult_t ncclSharpGetProperties_v10(int dev, ncclNetProperties_v10_t* props) {
   NCCLCHECK(ncclNetPlugin_v10.getProperties(dev, props));
@@ -268,11 +283,7 @@ ncclResult_t ncclSharpGetProperties_v6(int dev, ncclNetProperties_v6_t* props) {
   return  ncclNetPlugin_v6.getProperties(dev, props);
 }
 
-ncclResult_t ncclSharpGetProperties_v5(int dev, ncclNetProperties_v5_t* props) {
-  return ncclNetPlugin_v5.getProperties(dev, props);
-}
-
-ncclResult_t ncclSharpListen(int dev, void* opaqueHandle, void** listenComm) {
+ncclResult_t ncclSharpListen(void *ctx, int dev, void* opaqueHandle, void** listenComm) {
   struct ncclSharpListenComm *lComm;
   ncclResult_t status;
 
@@ -803,12 +814,48 @@ ncclResult_t ncclSharpCloseListen(void* listenComm) {
   return status;
 }
 
-ncclCollNet_v10_t ncclCollNetPlugin_v10 = {
+ncclResult_t ncclSharpFinalize(void* ctx) {
+  --sharpRefCount;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclSharpInit_v10(ncclDebugLogger_t logFunction) {
+  return ncclSharpInit(NULL, 0, logFunction);
+}
+
+ncclResult_t ncclSharpListen_v10(int dev, void* opaqueHandle, void** listenComm) {
+  return ncclSharpListen(NULL, dev, opaqueHandle, listenComm);
+}
+ 
+
+ncclCollNet_v11_t ncclCollNetPlugin_v11 = {
   "SHARP",
   ncclSharpInit,
   ncclSharpDevices,
-  ncclSharpGetProperties_v10,
+  ncclSharpGetProperties_v11,
   ncclSharpListen,
+  ncclSharpConnect,
+  ncclSharpReduceSupport,
+  ncclSharpRegMr,
+  ncclSharpRegMrDmaBuf,
+  ncclSharpDeregMr,
+  ncclSharpIallreduce,
+  ncclSharpIallgather,
+  ncclSharpIreducescatter,
+  ncclSharpIflush,
+  ncclSharpTest,
+  ncclSharpCloseColl,
+  ncclSharpCloseListen,
+  NULL,
+  ncclSharpFinalize
+};
+
+ncclCollNet_v10_t ncclCollNetPlugin_v10 = {
+  "SHARP",
+  ncclSharpInit_v10,
+  ncclSharpDevices,
+  ncclSharpGetProperties_v10,
+  ncclSharpListen_v10,
   ncclSharpConnect,
   ncclSharpReduceSupport,
   ncclSharpRegMr,
@@ -823,12 +870,13 @@ ncclCollNet_v10_t ncclCollNetPlugin_v10 = {
   ncclSharpCloseListen,
   NULL
 };
+
 ncclCollNet_v9_t ncclCollNetPlugin_v9 = {
   "SHARP",
-  ncclSharpInit,
+  ncclSharpInit_v10,
   ncclSharpDevices,
   ncclSharpGetProperties_v9,
-  ncclSharpListen,
+  ncclSharpListen_v10,
   ncclSharpConnect,
   ncclSharpReduceSupport,
   ncclSharpRegMr,
@@ -846,10 +894,10 @@ ncclCollNet_v9_t ncclCollNetPlugin_v9 = {
 
 ncclCollNet_v8_t ncclCollNetPlugin_v8 = {
   "SHARP",
-  ncclSharpInit,
+  ncclSharpInit_v10,
   ncclSharpDevices,
   ncclSharpGetProperties_v8,
-  ncclSharpListen,
+  ncclSharpListen_v10,
   ncclSharpConnect,
   ncclSharpReduceSupport,
   ncclSharpRegMr,
@@ -866,10 +914,10 @@ ncclCollNet_v8_t ncclCollNetPlugin_v8 = {
 
 ncclCollNet_v7_t ncclCollNetPlugin_v7 = {
   "SHARP",
-  ncclSharpInit,
+  ncclSharpInit_v10,
   ncclSharpDevices,
   ncclSharpGetProperties_v7,
-  ncclSharpListen,
+  ncclSharpListen_v10,
   ncclSharpConnect,
   ncclSharpReduceSupport,
   ncclSharpRegMr_v7,
@@ -884,31 +932,14 @@ ncclCollNet_v7_t ncclCollNetPlugin_v7 = {
 
 ncclCollNet_v6_t ncclCollNetPlugin_v6 = {
   "SHARP",
-  ncclSharpInit,
+  ncclSharpInit_v10,
   ncclSharpDevices,
   ncclSharpGetProperties_v6,
-  ncclSharpListen,
+  ncclSharpListen_v10,
   ncclSharpConnect,
   ncclSharpReduceSupport,
   ncclSharpRegMr_v7,
   ncclSharpRegMrDmaBuf,
-  ncclSharpDeregMr,
-  ncclSharpIallreduce_v8,
-  ncclSharpIflush,
-  ncclSharpTest,
-  ncclSharpCloseColl,
-  ncclSharpCloseListen
-};
-
-ncclCollNet_v5_t ncclCollNetPlugin_v5 = {
-  "SHARP",
-  ncclSharpInit,
-  ncclSharpDevices,
-  ncclSharpGetProperties_v5,
-  ncclSharpListen,
-  ncclSharpConnect,
-  ncclSharpReduceSupport,
-  ncclSharpRegMr_v7,
   ncclSharpDeregMr,
   ncclSharpIallreduce_v8,
   ncclSharpIflush,
