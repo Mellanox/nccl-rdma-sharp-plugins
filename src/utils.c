@@ -138,3 +138,23 @@ void ncclSetThreadName(pthread_t thread, const char *fmt, ...) {
   pthread_setname_np(thread, threadName);
 #endif
 }
+
+/* for data direct nic, the device name is ends with suffix '_dma`.
+ * remove this suffix before passing name to libsharp */
+ void plugin_get_device_name(const char *input, char *output, size_t output_size) {
+  const char *suffix = "_dma";
+  size_t input_len = strlen(input);
+  size_t suffix_len = strlen(suffix);
+
+  if (input_len >= suffix_len && strcmp(input + input_len - suffix_len, suffix) == 0) {
+    size_t new_len = input_len - suffix_len;
+    if (new_len >= output_size) {
+      new_len = output_size - 1;
+    }
+    memcpy(output, input, new_len);
+    output[new_len] = '\0';
+  } else {
+    strncpy(output, input, output_size - 1);
+    output[output_size - 1] = '\0';
+  }
+}

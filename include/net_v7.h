@@ -7,7 +7,6 @@
 #ifndef NCCL_NET_V7_H_
 #define NCCL_NET_V7_H_
 
-#include "net_device.h"
 
 typedef struct {
   char* name;                      // Used mostly for logging.
