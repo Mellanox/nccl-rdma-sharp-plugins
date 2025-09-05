@@ -323,7 +323,8 @@ static ncclResult_t nccl_ucx_rma_init_ucp(int dev, ucp_context_h *ctx)
   ucp_config_t *config;
   char         ucx_dev_name[PATH_MAX];
 
-  snprintf(ucx_dev_name, PATH_MAX, "%s:%d", ncclIbDevs[dev].devName,
+  plugin_get_device_name(ncclIbDevs[dev].devName, ucx_dev_name, PATH_MAX);
+  snprintf(ucx_dev_name, PATH_MAX, "%s:%d", ucx_dev_name,
            ncclIbDevs[dev].portNum);
   UCXCHECK(ucp_config_read("NCCL", NULL, &config));
 

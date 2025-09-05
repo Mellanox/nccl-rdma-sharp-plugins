@@ -361,8 +361,10 @@ static ncclResult_t ucx_init_context(ucp_context_h *ctx, int dev) {
   ncclResult_t result;
 
   if (ucp_ctx[dev] == NULL) {
-    snprintf(ucx_dev_name, PATH_MAX, "%s:%d", ncclIbDevs[dev].devName,
+    plugin_get_device_name(ncclIbDevs[dev].devName, ucx_dev_name, PATH_MAX);
+    snprintf(ucx_dev_name, PATH_MAX, "%s:%d", ucx_dev_name,
              ncclIbDevs[dev].portNum);
+
     UCXCHECK(ucp_config_read("NCCL", NULL, &config));
     UCXCHECK(ucp_config_modify(config, "NET_DEVICES", ucx_dev_name));
 
@@ -623,7 +625,7 @@ ucx_connect_check:
   comm->gpuFlush.enabled = 0;
   NCCLCHECK(ucx_worker_get_netaddress(comm->ucx_worker->worker, &my_addr, &local_addr_len));
   NCCLCHECK(nccl_ucx_add_ep(comm->ucx_worker, &comm->sock));
-  INFO(NCCL_NET, "NET/UCX: Worker address length: %zu", local_addr_len);
+  TRACE(NCCL_NET, "NET/UCX: Worker address length: %zu", local_addr_len);
 
   NCCLCHECK(ncclSocketSend(&comm->sock, &local_addr_len, sizeof(size_t)));
   NCCLCHECK(ncclSocketSend(&comm->sock, my_addr, local_addr_len));
