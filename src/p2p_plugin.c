@@ -560,24 +560,15 @@ ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, ch
 
       if (ncclSuccess != wrap_ibv_get_device_list(&devices, &nIbDevs)) { ret = ncclInternalError; goto fail; }
       for (int d=0; d<nIbDevs && ncclNIbDevs<MAX_IB_DEVS; d++) {
-        struct ibv_context * context;
+        struct ibv_context * context = NULL;
         if (ncclSuccess != wrap_ibv_open_device(&context, devices[d]) || context == NULL) {
           WARN("NET/IB : Unable to open device %s", devices[d]->name);
           continue;
         }
-        enum ncclIbProvider ibProvider = IB_PROVIDER_NONE;
-        char dataDirectDevicePath[PATH_MAX];
-        int dataDirectSupported = 0;
-        int skipNetDevForDataDirect = 0;
-        if (wrap_mlx5dv_is_supported(devices[d])) {
-          ibProvider = IB_PROVIDER_MLX5;
-          snprintf(dataDirectDevicePath, PATH_MAX, "/sys");
-          if((ncclMlx5dvDmaBufCapable(context)) && (wrap_mlx5dv_get_data_direct_sysfs_path(context, dataDirectDevicePath + 4, PATH_MAX - 4) == ncclSuccess)) {
-            INFO(NCCL_INIT|NCCL_NET, "Data Direct DMA Interface is detected for device:%s", devices[d]->name);
-            if(ncclParamIbDataDirect() == 1) { dataDirectSupported = 1; skipNetDevForDataDirect = 1; }
-            if(ncclParamIbDataDirect() == 2) { dataDirectSupported = 1; skipNetDevForDataDirect = 0; }
-          }
-        }
+        char dataDirectDevicePath[PATH_MAX] = "/sys";
+        int devCount = /*undefined*/-1, devOffset = 0;
+        enum ncclIbProvider ibProvider = wrap_mlx5dv_is_supported(devices[d]) ? IB_PROVIDER_MLX5 : IB_PROVIDER_NONE;
+
         int nPorts = 0;
         struct ibv_device_attr devAttr;
         if (ncclSuccess != wrap_ibv_query_device(context, &devAttr)) {
@@ -586,7 +577,6 @@ ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, ch
           continue;
         }
         for (int port_num = 1; port_num <= devAttr.phys_port_cnt; port_num++) {
-          for (int dataDirect = skipNetDevForDataDirect; dataDirect < 1 + dataDirectSupported; ++dataDirect) {
             struct ibv_port_attr portAttr;
             uint32_t portSpeed;
             if (ncclSuccess != wrap_ibv_query_port(context, port_num, &portAttr)) {
@@ -594,74 +584,97 @@ ncclResult_t nccl_p2p_ib_init(int *nDevs, int *nmDevs, ncclIbDev *ncclIbDevs, ch
               continue;
             }
             if (portAttr.state != IBV_PORT_ACTIVE) continue;
-            if (portAttr.link_layer != IBV_LINK_LAYER_INFINIBAND
-                && portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
+            if (portAttr.link_layer != IBV_LINK_LAYER_INFINIBAND && portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
 
             // check against user specified HCAs/ports
             if (! (matchIfList(devices[d]->name, port_num, userIfs, nUserIfs, searchExact) ^ searchNot)) {
               continue;
             }
-            pthread_mutex_init(&ncclIbDevs[ncclNIbDevs].lock, NULL);
-            ncclIbDevs[ncclNIbDevs].device = d;
-            ncclIbDevs[ncclNIbDevs].ibProvider = ibProvider;
-            ncclIbDevs[ncclNIbDevs].guid = devAttr.sys_image_guid;
-            ncclIbDevs[ncclNIbDevs].portAttr = portAttr;
-            ncclIbDevs[ncclNIbDevs].portNum = port_num;
-            ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
-            #if HAVE_STRUCT_IBV_PORT_ATTR_ACTIVE_SPEED_EX
-            portSpeed = portAttr.active_speed_ex ? portAttr.active_speed_ex : portAttr.active_speed;
-            #else
-            portSpeed = portAttr.active_speed;
-            #endif
-            ncclIbDevs[ncclNIbDevs].speed = nccl_p2p_ib_speed(portSpeed) * nccl_p2p_ib_width(portAttr.active_width);
-            ncclIbDevs[ncclNIbDevs].context = context;
-            ncclIbDevs[ncclNIbDevs].pdRefs = 0;
-            ncclIbDevs[ncclNIbDevs].pd = NULL;
-            if (!dataDirect) {
-              strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
-              NCCLCHECKGOTO(nccl_p2p_ib_pci_path(ncclIbDevs, ncclNIbDevs, ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort), ret, fail);
-            } else {
-              snprintf(ncclIbDevs[ncclNIbDevs].devName, MAXNAMESIZE, "%s_dma", devices[d]->name);
-              ncclIbDevs[ncclNIbDevs].pciPath = malloc(PATH_MAX);
-              strncpy(ncclIbDevs[ncclNIbDevs].pciPath, dataDirectDevicePath, PATH_MAX);
-              ncclIbDevs[ncclNIbDevs].capsProvider.mlx5.dataDirect = 1;
-            }
-            ncclIbDevs[ncclNIbDevs].maxQp = devAttr.max_qp;
-            ncclIbDevs[ncclNIbDevs].mrCache.capacity = 0;
-            ncclIbDevs[ncclNIbDevs].mrCache.population = 0;
-            ncclIbDevs[ncclNIbDevs].mrCache.slots = NULL;
-            NCCLCHECK(ncclIbStatsInit(&ncclIbDevs[ncclNIbDevs].stats));
-
-          // Enable ADAPTIVE_ROUTING by default on IB networks
-            // But allow it to be overloaded by an env parameter
-            ncclIbDevs[ncclNIbDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
-            if (ncclParamIbAdaptiveRouting() != -2) ncclIbDevs[ncclNIbDevs].ar = ncclParamIbAdaptiveRouting();
-
-            ncclIbDevs[ncclNIbDevs].isSharpDev = 0;
-            if (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND)
-            {
-              ncclIbDevs[ncclNIbDevs].isSharpDev = 1;
-              ncclIbDevs[ncclNIbDevs].maxQp = ncclParamSharpMaxComms();
-              ncclNSharpDevs++;
-            }
-            TRACE(NCCL_NET,"NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d", d, devices[d]->name, devices[d]->dev_name, ncclIbDevs[ncclNIbDevs].portNum,
-              NCCL_IB_LLSTR(portAttr.link_layer), ibProviderName[ncclIbDevs[ncclNIbDevs].ibProvider], ncclIbDevs[ncclNIbDevs].speed, context, ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar);
-            if (ncclIbAsyncThread != NULL) {
-              PTHREADCHECKGOTO(pthread_create(ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs), "pthread_create", ret, fail);
-              ncclSetThreadName(*ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
-              PTHREADCHECKGOTO(pthread_detach(*ncclIbAsyncThread), "pthread_detach", ret, fail); // will not be pthread_join()'d
+            // check for mlx5 data direct support only once for a each device
+            if (devCount == -1) {
+              devCount = 1;
+              devOffset = 0;
+              if (ncclParamIbDataDirect() > 0 && ibProvider == IB_PROVIDER_MLX5 && ncclMlx5dvDmaBufCapable(context)) {
+                int pathLen = strlen(dataDirectDevicePath);
+                ncclResult_t res = wrap_mlx5dv_get_data_direct_sysfs_path(context, dataDirectDevicePath + pathLen, sizeof(dataDirectDevicePath) - pathLen);
+                if (res == ncclSuccess) {
+                  // data direct devices are exposed twice: with the C2C + PCIe link and with the data direct link
+                  devCount = 2;
+                  // by default only expose the data direct NIC (devOffset = 1), unless set to 2 by the user
+                  devOffset = (ncclParamIbDataDirect() == 2) ? 0 : 1;
+                  INFO(NCCL_INIT | NCCL_NET, "NET/IB: Data Direct DMA Interface is detected for device %s", devices[d]->name);
+                } else if (res == ncclInvalidArgument) {
+                  TRACE(NCCL_NET, "NET/IB: Device %s does not support Data Direct DMA.", devices[d]->name);
+                } else {
+                  WARN("NET/IB: Error in mlx5dv_get_data_direct_sysfs_path with device %s", devices[d]->name);
+                  ret = res;
+                  goto fail;
+                }
+              }
             }
 
-            // Add this plain physical device to the list of virtual devices
-            int vDev;
-            ncclNetVDeviceProps_t vProps = {0};
-            vProps.ndevs = 1;
-            vProps.devs[0] = ncclNIbDevs;
-            NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps, ncclNIbDevs, &ncclNMergedIbDevs));
+            for (int dev = devOffset; dev < devCount; ++dev) {
+              pthread_mutex_init(&ncclIbDevs[ncclNIbDevs].lock, NULL);
+              ncclIbDevs[ncclNIbDevs].device = d;
+              ncclIbDevs[ncclNIbDevs].ibProvider = ibProvider;
+              ncclIbDevs[ncclNIbDevs].guid = devAttr.sys_image_guid;
+              ncclIbDevs[ncclNIbDevs].portAttr = portAttr;
+              ncclIbDevs[ncclNIbDevs].portNum = port_num;
+              ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
+              #if HAVE_STRUCT_IBV_PORT_ATTR_ACTIVE_SPEED_EX
+              portSpeed = portAttr.active_speed_ex ? portAttr.active_speed_ex : portAttr.active_speed;
+              #else
+              portSpeed = portAttr.active_speed;
+              #endif
+              ncclIbDevs[ncclNIbDevs].speed = nccl_p2p_ib_speed(portSpeed) * nccl_p2p_ib_width(portAttr.active_width);
+              ncclIbDevs[ncclNIbDevs].context = context;
+              ncclIbDevs[ncclNIbDevs].pdRefs = 0;
+              ncclIbDevs[ncclNIbDevs].pd = NULL;
+              if (dev ==0) {
+                strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
+                NCCLCHECKGOTO(nccl_p2p_ib_pci_path(ncclIbDevs, ncclNIbDevs, ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort), ret, fail);
+              } else {
+                snprintf(ncclIbDevs[ncclNIbDevs].devName, MAXNAMESIZE, "%s_dma", devices[d]->name);
+                ncclIbDevs[ncclNIbDevs].pciPath = malloc(PATH_MAX);
+                strncpy(ncclIbDevs[ncclNIbDevs].pciPath, dataDirectDevicePath, PATH_MAX);
+                ncclIbDevs[ncclNIbDevs].capsProvider.mlx5.dataDirect = 1;
+              }
+              ncclIbDevs[ncclNIbDevs].maxQp = devAttr.max_qp;
+              ncclIbDevs[ncclNIbDevs].mrCache.capacity = 0;
+              ncclIbDevs[ncclNIbDevs].mrCache.population = 0;
+              ncclIbDevs[ncclNIbDevs].mrCache.slots = NULL;
+              NCCLCHECK(ncclIbStatsInit(&ncclIbDevs[ncclNIbDevs].stats));
 
-            ncclNIbDevs++;
-            nPorts++;
-          }
+              // Enable ADAPTIVE_ROUTING by default on IB networks
+              // But allow it to be overloaded by an env parameter
+              ncclIbDevs[ncclNIbDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
+              if (ncclParamIbAdaptiveRouting() != -2) ncclIbDevs[ncclNIbDevs].ar = ncclParamIbAdaptiveRouting();
+
+              ncclIbDevs[ncclNIbDevs].isSharpDev = 0;
+              if (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) {
+                ncclIbDevs[ncclNIbDevs].isSharpDev = 1;
+                ncclIbDevs[ncclNIbDevs].maxQp = ncclParamSharpMaxComms();
+                ncclNSharpDevs++;
+              }
+
+              TRACE(NCCL_NET,"NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d", d, devices[d]->name, devices[d]->dev_name, ncclIbDevs[ncclNIbDevs].portNum,
+                NCCL_IB_LLSTR(portAttr.link_layer), ibProviderName[ncclIbDevs[ncclNIbDevs].ibProvider], ncclIbDevs[ncclNIbDevs].speed, context, ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar);
+              if (ncclIbAsyncThread != NULL) {
+                PTHREADCHECKGOTO(pthread_create(ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs), "pthread_create", ret, fail);
+                ncclSetThreadName(*ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
+                PTHREADCHECKGOTO(pthread_detach(*ncclIbAsyncThread), "pthread_detach", ret, fail); // will not be pthread_join()'d
+              }
+
+              // Add this plain physical device to the list of virtual devices
+              int vDev;
+              ncclNetVDeviceProps_t vProps = {0};
+              vProps.ndevs = 1;
+              vProps.devs[0] = ncclNIbDevs;
+              NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps, ncclNIbDevs, &ncclNMergedIbDevs));
+
+              ncclNIbDevs++;
+              nPorts++;
+            }
         }
         if (nPorts == 0 && ncclSuccess != wrap_ibv_close_device(context))  { ret = ncclInternalError; goto fail; }
       }

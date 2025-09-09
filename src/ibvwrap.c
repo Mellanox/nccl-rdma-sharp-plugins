@@ -309,12 +309,11 @@ ncclResult_t wrap_mlx5dv_get_data_direct_sysfs_path(struct ibv_context *context,
 #if HAVE_DECL_MLX5DV_GET_DATA_DIRECT_SYSFS_PATH
    int ret;
   ret = mlx5dv_get_data_direct_sysfs_path(context, buf, buf_len);
-  if (!ret) {
-    return ncclSuccess;
-  } else {
-    INFO(NCCL_NET, "Call to mlx5dv_get_data_direct_sysfs_path failed with error %s errno %d", strerror(ret), ret);
-    return ncclSystemError;
-  }
+  if (ret == 0) return ncclSuccess;
+  /* ENODEV can happen if the devices is not data-direct but mlx5 is used. It's not an error*/
+  if (ret == ENODEV) return ncclInvalidArgument;
+  INFO(NCCL_NET, "Call to mlx5dv_get_data_direct_sysfs_path failed with error %s errno %d", strerror(ret), ret);
+  return ncclSystemError;
 #else
   INFO(NCCL_NET, "Symbol mlx5dv_get_data_direct_sysfs_path in rdma-core library");
   return ncclSystemError;
