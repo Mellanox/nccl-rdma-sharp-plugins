@@ -30,8 +30,6 @@
 static char ncclIbIfName[MAX_IF_NAME_SIZE+1];
 static union ncclSocketAddress ncclIbIfAddr;
 
-static ncclNetCommConfig_t ibContext;
-
 pthread_mutex_t ncclIbLock = PTHREAD_MUTEX_INITIALIZER;
 int ncclIbRelaxedOrderingEnabled = 0;
 
@@ -688,7 +686,12 @@ ncclResult_t ncclIbSetNetAttr(void *ctx, ncclNetAttr_t *netAttr) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+static ncclResult_t ncclIbFinalizeDevices(void) {
+  ibRefCount--;
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
   if (ibRefCount++) return ncclSuccess;
   if (ncclParamIbDisable()) return ncclInternalError;
 
@@ -705,8 +708,20 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* co
 
   ncclResult_t ret = nccl_p2p_ib_init(&ncclNIbDevs, &ncclNMergedIbDevs, ncclIbDevs, ncclIbIfName, &ncclIbIfAddr, &ncclIbAsyncThread, logFunction);
   if (ret != ncclSuccess) return ret;
-  if (config)  ibContext.trafficClass = config->trafficClass;
-  if (ctx)  *ctx = (void*)&ibContext;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+  ncclNetCommConfig_t* netCommConfig = NULL;
+  NCCLCHECK(ncclIbInitDevices(logFunction, profFunction));
+
+  if (ctx) {
+    netCommConfig = malloc(sizeof(ncclNetCommConfig_t));
+    if (!netCommConfig) return ncclInternalError;
+    memset(netCommConfig, 0, sizeof(ncclNetCommConfig_t)); 
+    if (config) netCommConfig->trafficClass = config->trafficClass;
+    *ctx = (void *)netCommConfig;
+  }
   return ncclSuccess;
 }
 
@@ -1000,7 +1015,7 @@ ib_recv_dev_list:
           INFO(NCCL_NET,"NET/IB: %s %d IbDev %d Port %d qpn %d mtu %d LID %d subnet-prefix %lu  FLID %d fifoRkey=0x%x fifoLkey=0x%x",
             comm->base.vProps.ndevs > 2 ? "NCCL MergedDev" : "NCCL Dev",
             dev, commDev->base.ibDevN, ibDev->portNum, meta.qpInfo[q].qpn, devInfo->mtu, devInfo->lid,
-	    devInfo->gid.global.subnet_prefix, ncclIbExtractFlid(&devInfo->gid), devInfo->fifoRkey, commDev->fifoMr->lkey);
+	        (uint64_t)devInfo->gid.global.subnet_prefix, ncclIbExtractFlid(&devInfo->gid), devInfo->fifoRkey, commDev->fifoMr->lkey);
       }
     } else { // RoCE
       for (int q = 0; q < comm->base.nqps; q++) {
@@ -1009,7 +1024,7 @@ ib_recv_dev_list:
           INFO(NCCL_NET,"NET/IB: %s %d IbDev %d Port %d qpn %d mtu %d query_ece={supported=%d, vendor_id=0x%x, options=0x%x, comp_mask=0x%x} GID %ld (%lX/%lX) fifoRkey=0x%x fifoLkey=0x%x",
           comm->base.vProps.ndevs > 2 ? "NCCL MergedDev" : "NCCL Dev", dev,
           commDev->base.ibDevN, ibDev->portNum, meta.qpInfo[q].qpn, devInfo->mtu, meta.qpInfo[q].ece_supported, meta.qpInfo[q].ece.vendor_id, meta.qpInfo[q].ece.options, meta.qpInfo[q].ece.comp_mask, (int64_t)commDev->base.gidInfo.localGidIndex,
-          devInfo->gid.global.subnet_prefix, devInfo->gid.global.interface_id, devInfo->fifoRkey, commDev->fifoMr->lkey);
+          (uint64_t)devInfo->gid.global.subnet_prefix, devInfo->gid.global.interface_id, devInfo->fifoRkey, commDev->fifoMr->lkey);
       }
     }
     if (link_layer == IBV_LINK_LAYER_UNSPECIFIED) link_layer = devInfo->link_layer;
@@ -1464,7 +1479,7 @@ ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r) {
 
 ncclResult_t ncclIbTest(void* request, int* done, int* size);
 
-ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset, int fd, struct ibv_mr** mhandle) {
+ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mrFlags, struct ibv_mr** mhandle) {
   static __thread uintptr_t pageSize = 0;
   if (pageSize == 0) pageSize = sysconf(_SC_PAGESIZE);
 
@@ -1481,8 +1496,9 @@ ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, s
       }
       // Deregister / register
       struct ibv_mr* mr;
-      unsigned int flags = IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ;
-      if (ncclIbRelaxedOrderingEnabled) flags |= IBV_ACCESS_RELAXED_ORDERING;
+      unsigned int flags = IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ|IBV_ACCESS_REMOTE_ATOMIC;
+      bool relaxedOrdering = ncclIbRelaxedOrderingEnabled && (mrFlags & NCCL_NET_MR_FLAG_FORCE_SO) == 0;
+      if (relaxedOrdering) flags |= IBV_ACCESS_RELAXED_ORDERING;
       if (fd != -1) {
         /* DMA-BUF support */
         if (!ncclIbDevs[base->ibDevN].capsProvider.mlx5.dataDirect) {
@@ -1491,7 +1507,7 @@ ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, s
           NCCLCHECKGOTO(wrap_mlx5dv_reg_dmabuf_mr(&mr, base->pd, offset, pages*pageSize, addr, fd, flags, 1), res, returning);
         }
       } else {
-        if (ncclIbRelaxedOrderingEnabled) {
+        if (relaxedOrdering) {
           // Use IBVERBS_1.8 API - needed for IBV_ACCESS_RELAXED_ORDERING support
           NCCLCHECKGOTO(wrap_ibv_reg_mr_iova2(&mr, base->pd, (void*)addr, pages*pageSize, addr, flags), res, returning);
         }
@@ -1533,7 +1549,7 @@ struct ncclIbNetCommDevBase* ncclIbGetNetCommDevBase(ncclIbNetCommBase* base, in
 }
 
 /* DMA-BUF support */
-ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mrFlags, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
   assert(size > 0);
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*) comm;
@@ -1541,7 +1557,7 @@ ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, ui
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
     struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
-    NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal(devComm, data, size, type, offset, fd, mhandleWrapper->mrs + i), ret, fail);
+    NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal2(devComm, data, size, type, offset, fd, mrFlags, mhandleWrapper->mrs + i), ret, fail);
   }
   *mhandle = (void*) mhandleWrapper;
 exit:
@@ -1551,8 +1567,12 @@ fail:
   goto exit;
 }
 
+ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+  return ncclIbRegMrDmaBufInternal(comm, data, size, type, offset, fd, 0ULL, mhandle);
+}
+
 ncclResult_t ncclIbRegMr(void* comm, void* data, size_t size, int type, void** mhandle) {
-  return ncclIbRegMrDmaBuf(comm, data, size, type, 0ULL, -1, mhandle);
+  return ncclIbRegMrDmaBufInternal(comm, data, size, type, 0ULL, -1, 0, mhandle);
 }
 
 ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, struct ibv_mr* mhandle) {
@@ -2120,8 +2140,8 @@ ncclResult_t ncclIbMakeVDevice(int* d, ncclNetVDeviceProps_t* props) {
 }
 
 ncclResult_t ncclIbFinalize(void* ctx) {
-  ibRefCount--;
-  return ncclSuccess;
+  if (ctx) free(ctx);
+  return ncclIbFinalizeDevices();
 }
 
 ncclResult_t ncclIbInit_v10(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profilerCallback) {
