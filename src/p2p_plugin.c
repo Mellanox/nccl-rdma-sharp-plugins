@@ -421,7 +421,7 @@ static void* ncclIbAsyncThreadMain(void* args) {
     case IBV_EVENT_CLIENT_REREGISTER:
     case IBV_EVENT_SRQ_LIMIT_REACHED:
       // the above are non-fatal
-      WARN("NET/IB : %s:%d Got async error event: %s", dev->devName, dev->portNum, str);
+      WARN("NET/IB : %s:%d Got non-fatal async event: %s(%d)", dev->devName, dev->portNum, str, event.event_type);
       break;
     case IBV_EVENT_COMM_EST:
       break;
