@@ -8,12 +8,12 @@
 
 #include <pthread.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <assert.h>
-#include <string.h>
 
 #include "config.h"
 #include "core.h"
@@ -55,6 +55,28 @@ enum ncclSharpRequestType {
   NCCL_SHARP_REQ_SHARP_COLL,
   NCCL_SHARP_REQ_IFLUSH,
 };
+
+static void ncclSharpSetEnv(const char* name, const char* value) {
+  /* We explicitly want the plugin profile to win over existing env vars. */
+  setenv(name, value, 1);
+}
+
+static void ncclSharpApplyLibEnvProfile(void) {
+  const char* overlapAgEnv = getenv("SHARP_COLLNET_OVERLAP_AG");
+  /* Only apply a profile if Megatron explicitly requests it. */
+  if (overlapAgEnv == NULL) return;
+
+  const int overlapAg = (strcmp(overlapAgEnv, "1") == 0);
+  if (overlapAg) {
+    /* For allgather overlap (multicast path) */
+    ncclSharpSetEnv("SHARP_COLL_ENABLE_MCAST", "1");
+    ncclSharpSetEnv("SHARP_COLL_ENABLE_SAT", "0");
+  } else {
+    /* For reduce-scatter (non-overlap default path) */
+    ncclSharpSetEnv("SHARP_COLL_ENABLE_MCAST", "0");
+    ncclSharpSetEnv("SHARP_COLL_ENABLE_SAT", "1");
+  }
+}
 
 struct ncclSharpRequest {
   int requestType;
@@ -220,11 +242,13 @@ ncclResult_t ncclSharpInit(void **ctx, uint64_t commId, ncclDebugLogger_t logFun
   gettimeofday(&tval, NULL);
   srand((int) tval.tv_usec);
 
-  /* set SHARP COLL library default for plugin */
   setenv("SHARP_COLL_ENABLE_SAT", "1", 0);
   setenv("SHARP_COLL_NUM_COLL_GROUP_RESOURCE_ALLOC_THRESHOLD", "0", 0);
   setenv("SHARP_COLL_LOCK_ON_COMM_INIT", "1", 0);
   setenv("SHARP_COLL_LOG_LEVEL", "3", 0);
+
+  /* Apply Megatron-driven env profile (only if SHARP_COLLNET_OVERLAP_AG is set) */
+  ncclSharpApplyLibEnvProfile();
 
   if (ncclParamSharpDisableAG()) {
     INFO(NCCL_NET, "Disabled SHARP Allgather");
