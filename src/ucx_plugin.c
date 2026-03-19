@@ -679,7 +679,7 @@ ucx_accept_check:
   UCXCHECK(ucp_ep_create(r_comm->ucx_worker->worker, &ep_params, &r_comm->ep));
   NCCLCHECK(ncclSocketRecv(&r_comm->sock, &r_comm->ctag, sizeof(ucp_tag_t)));
 
-  r_comm->gpuFlush.enabled = (nccl_p2p_gdr_support(l_comm->dev) == ncclSuccess);  
+  r_comm->gpuFlush.enabled = (nccl_p2p_gdr_support() == ncclSuccess);
   if (r_comm->gpuFlush.enabled) {
     ucp_address_t *my_addr;
     size_t        local_addr_len;

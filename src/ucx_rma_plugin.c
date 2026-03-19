@@ -691,7 +691,7 @@ ucx_accept_check:
   UCXCHECK(ucp_ep_rkey_unpack(r_comm->ep, rkey_buf, &r_comm->rem_fifo.rkey));
   free(rkey_buf);
 
-  if (nccl_p2p_gdr_support(l_comm->dev) == ncclSuccess) {
+  if (nccl_p2p_gdr_support() == ncclSuccess) {
     r_comm->super.gpuFlush.enabled = 1;
   }
 
