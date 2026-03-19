@@ -496,7 +496,7 @@ ncclResult_t nccl_uct_close_listen(void *listen_comm) {
 static ncclResult_t nccl_uct_comm_gpu_flush_init(nccl_uct_comm_t *comm) {
   size_t size = comm->uct_iface->min_get_zcopy;
 
-  comm->gpu_flush.enabled = (nccl_p2p_gdr_support(comm->dev) == ncclSuccess) ||
+  comm->gpu_flush.enabled = (nccl_p2p_gdr_support() == ncclSuccess) ||
                             (nccl_p2p_dmabuf_support(comm->dev) == ncclSuccess);
 
   if (!comm->gpu_flush.enabled) {
