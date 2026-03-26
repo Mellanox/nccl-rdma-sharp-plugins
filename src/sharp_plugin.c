@@ -265,8 +265,7 @@ ncclResult_t ncclSharpInit(void **ctx, uint64_t commId, ncclDebugLogger_t logFun
 }
 
 ncclResult_t ncclSharpDevices(int* ndev) {
-  *ndev = ncclNSharpDevs;
-  return ncclSuccess;
+  return ncclNetPlugin_v11.devices(ndev);
 }
 
 ncclResult_t ncclSharpGetProperties_v11(int dev, ncclNetProperties_v11_t* props) {
@@ -318,24 +317,39 @@ ncclResult_t ncclSharpListen(void *ctx, int dev, void* opaqueHandle, void** list
   return status;
 }
 
-/* for data direct nic, the device name is ends with suffix '_dma`.
- * remove this suffix before passing name to libsharp */
-static void sharp_get_device_name(const char *input, char *output, size_t output_size) {
+/* Build libsharp device list: split merged NICs on '+', strip optional
+ * '_dma' suffix per token (data-direct), join with ',', append ':1' per device. */
+static void ncclSharpProcessDeviceName(const char *input, char *output, size_t output_size, int *isDirectNic) {
   const char *suffix = "_dma";
-  size_t input_len = strlen(input);
-  size_t suffix_len = strlen(suffix);
+  const size_t suffix_len = strlen(suffix);
+  *isDirectNic = 0;
+  if (output_size == 0) return;
+  output[0] = '\0';
 
-  if (input_len >= suffix_len && strcmp(input + input_len - suffix_len, suffix) == 0) {
-    size_t new_len = input_len - suffix_len;
-    if (new_len >= output_size) {
-      new_len = output_size - 1;
+  char buf[MAX_MERGED_DEV_NAME];
+  strncpy(buf, input, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+
+  size_t o = 0;
+  char *saveptr;
+  for (char *tok = strtok_r(buf, "+", &saveptr); tok; tok = strtok_r(NULL, "+", &saveptr)) {
+    size_t len = strlen(tok);
+    if (len >= suffix_len && memcmp(tok + len - suffix_len, suffix, suffix_len) == 0) {
+      len -= suffix_len;
+      *isDirectNic = 1;
     }
-    memcpy(output, input, new_len);
-    output[new_len] = '\0';
-  } else {
-    strncpy(output, input, output_size - 1);
-    output[output_size - 1] = '\0';
+    if (len == 0) continue;
+
+    size_t need = (o > 0 ? 1 : 0) + len + 2 + 1;
+    if (o + need > output_size) break;
+
+    if (o > 0) output[o++] = ',';
+    memcpy(output + o, tok, len);
+    o += len;
+    memcpy(output + o, ":1", 2);
+    o += 2;
   }
+  output[o] = '\0';
 }
 
 ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* listenComm, void** collComm) {
@@ -410,11 +424,11 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
   init_spec.config = sharp_coll_default_config;
   init_spec.config.user_progress_num_polls = 10000000;
 
-  char devName[MAXNAMESIZE];
-  ncclNetProperties_v6_t prop;
-  ncclSharpGetProperties_v6(lComm->dev, &prop);
-  sharp_get_device_name(prop.name, devName, 64);
-  snprintf(devName + strlen(devName), MAXNAMESIZE - strlen(devName), ":%d", prop.port);
+  char devName[MAX_MERGED_DEV_NAME];
+  int isDirectNic = 0;
+  ncclNetProperties_v11_t prop;
+  ncclSharpGetProperties_v11(lComm->dev, &prop);
+  ncclSharpProcessDeviceName(prop.name, devName, sizeof(devName), &isDirectNic);
   init_spec.config.ib_dev_list = devName;
 
   int ret = sharp_coll_init(&init_spec, &cComm->sharpCollContext);
@@ -850,7 +864,14 @@ ncclResult_t ncclSharpInit_v10(ncclDebugLogger_t logFunction) {
 ncclResult_t ncclSharpListen_v10(int dev, void* opaqueHandle, void** listenComm) {
   return ncclSharpListen(NULL, dev, opaqueHandle, listenComm);
 }
- 
+
+ncclResult_t ncclSharpMakeVDevice(int* d, ncclNetVDeviceProps_v11_t* props) {
+  return ncclNetPlugin_v11.makeVDevice(d, props);
+}
+
+ncclResult_t ncclSharpMakeVDevice_v10(int* d, ncclNetVDeviceProps_v10_t* props) {
+  return ncclNetPlugin_v10.makeVDevice(d, props);
+}
 
 ncclCollNet_v11_t ncclCollNetPlugin_v11 = {
   "SHARP",
@@ -870,7 +891,7 @@ ncclCollNet_v11_t ncclCollNetPlugin_v11 = {
   ncclSharpTest,
   ncclSharpCloseColl,
   ncclSharpCloseListen,
-  NULL,
+  ncclSharpMakeVDevice,
   ncclSharpFinalize
 };
 
