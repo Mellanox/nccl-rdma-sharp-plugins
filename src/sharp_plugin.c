@@ -71,10 +71,12 @@ static void ncclSharpApplyLibEnvProfile(void) {
     /* For allgather overlap (multicast path) */
     ncclSharpSetEnv("SHARP_COLL_ENABLE_MCAST", "1");
     ncclSharpSetEnv("SHARP_COLL_ENABLE_SAT", "0");
+    INFO(NCCL_INIT|NCCL_NET|NCCL_ENV, "SHARP: Offloaded Allgather requested");
   } else {
     /* For reduce-scatter (non-overlap default path) */
     ncclSharpSetEnv("SHARP_COLL_ENABLE_MCAST", "0");
     ncclSharpSetEnv("SHARP_COLL_ENABLE_SAT", "1");
+    INFO(NCCL_INIT|NCCL_NET|NCCL_ENV, "SHARP: Streaming Aggregation based Reduction requested");
   }
 }
 
@@ -247,8 +249,6 @@ ncclResult_t ncclSharpInit(void **ctx, uint64_t commId, ncclDebugLogger_t logFun
   setenv("SHARP_COLL_LOCK_ON_COMM_INIT", "1", 0);
   setenv("SHARP_COLL_LOG_LEVEL", "3", 0);
 
-  /* Apply Megatron-driven env profile (only if SHARP_COLLNET_OVERLAP_AG is set) */
-  ncclSharpApplyLibEnvProfile();
 
   if (ncclParamSharpDisableAG()) {
     INFO(NCCL_NET, "Disabled SHARP Allgather");
@@ -370,6 +370,9 @@ ncclResult_t ncclSharpConnect(void* handles[], int nranks, int rank, void* liste
       return ncclInvalidUsage;
     }
   }
+
+  /* Apply Megatron-driven env profile (only if SHARP_COLLNET_OVERLAP_AG is set) */
+  ncclSharpApplyLibEnvProfile();
 
   NCCLCHECK(ncclIbMalloc((void**)&cComm, sizeof(struct ncclSharpCollComm)));
   NCCLCHECK(ncclIbMalloc((void**)&cComm->reqs, sizeof(struct ncclSharpRequest)*MAX_REQUESTS));
