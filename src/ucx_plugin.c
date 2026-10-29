@@ -44,7 +44,7 @@ static int ucxRefCount = 0;
 
 
 NCCL_PARAM(UCXDisable, "UCX_DISABLE", 0);
-/* Exclude cuda-related UCX transports */
+/* Disable UCX memory type copies (exclude cuda transports on UCX < 1.19) */
 NCCL_PARAM(UCXCudaDisable, "UCX_CUDA_DISABLE", 1);
 
 extern ncclDebugLogger_t pluginLogFunction;
@@ -324,6 +324,18 @@ static ncclResult_t ucx_config_no_cuda(ucp_config_t *config) {
   ssize_t n;
 
   ucx_tls = getenv("NCCL_UCX_TLS");
+
+  /* UCX >= 1.19: keep cuda transports loaded, but disable memory type copies
+   * (and with them the rendezvous pipeline protocols) */
+  if (ucp_config_modify(config, "MEMTYPE_COPY_ENABLE", "n") == UCS_OK) {
+    INFO(NCCL_NET, "NET/UCX: using UCX_MEMTYPE_COPY_ENABLE=n");
+    if (ucx_tls != NULL) {
+      UCXCHECK(ucp_config_modify(config, "TLS", ucx_tls));
+    }
+    goto out;
+  }
+
+  /* Older UCX: exclude cuda transports */
   if (ucx_tls == NULL) {
     ucx_tls = getenv("UCX_TLS");
   }
@@ -346,9 +358,12 @@ static ncclResult_t ucx_config_no_cuda(ucp_config_t *config) {
     }
   }
 
+  INFO(NCCL_NET, "NET/UCX: using UCX_TLS=%s", ucx_tls);
   UCXCHECK(ucp_config_modify(config, "TLS", ucx_tls));
   UCXCHECK(ucp_config_modify(config, "RNDV_THRESH", "0"));
   UCXCHECK(ucp_config_modify(config, "RNDV_SCHEME", "get_zcopy"));
+
+out:
   UCXCHECK(
       ucp_config_modify(config, "MEMTYPE_REG_WHOLE_ALLOC_TYPES", "unknown"));
   return ncclSuccess;
